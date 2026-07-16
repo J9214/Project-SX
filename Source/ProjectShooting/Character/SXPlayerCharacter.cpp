@@ -19,6 +19,8 @@
 #include "Components/SXPickupComponent.h"
 #include "Components/SXStatusComponent.h"
 #include "Input/SXInputConfig.h"
+#include "Interaction/SXInteractableInterface.h"
+#include "Skill/SXSkillComponent.h"
 
 ASXPlayerCharacter::ASXPlayerCharacter()
 {
@@ -47,6 +49,8 @@ ASXPlayerCharacter::ASXPlayerCharacter()
 	SpringArmComponent->bInheritRoll = false;
 	SpringArmComponent->bDoCollisionTest = true;
 	SpringArmComponent->SetActive(false);
+
+	SkillComponent = CreateDefaultSubobject<USXSkillComponent>(TEXT("SkillComponent"));
 
 	GetMesh()->SetOwnerNoSee(true);
 
@@ -84,6 +88,12 @@ void ASXPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 		return;
 	}
 
+	if (IsValid(PlayerCharacterInputConfig.Get()) == false)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s has no PlayerCharacterInputConfig."), *GetName());
+		return;
+	}
+
 	if (PlayerCharacterInputConfig->MoveAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->MoveAction, ETriggerEvent::Triggered, this, &ThisClass::Move);
 	if (PlayerCharacterInputConfig->LookAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->LookAction, ETriggerEvent::Triggered, this, &ThisClass::Look);
 	if (PlayerCharacterInputConfig->JumpAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->JumpAction, ETriggerEvent::Started, this, &ThisClass::StartJump);
@@ -92,13 +102,16 @@ void ASXPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	if (PlayerCharacterInputConfig->SprintAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->SprintAction, ETriggerEvent::Completed, this, &ThisClass::StopSprint);
 	if (PlayerCharacterInputConfig->FireAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->FireAction, ETriggerEvent::Started, this, &ThisClass::StartFire);
 	if (PlayerCharacterInputConfig->FireAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->FireAction, ETriggerEvent::Completed, this, &ThisClass::StopFire);
+	if (PlayerCharacterInputConfig->AttackMeleeAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->AttackMeleeAction, ETriggerEvent::Started, this, &ThisClass::AttackMelee);
 	if (PlayerCharacterInputConfig->ReloadAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->ReloadAction, ETriggerEvent::Started, this, &ThisClass::Reload);
 	if (PlayerCharacterInputConfig->InteractAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->InteractAction, ETriggerEvent::Started, this, &ThisClass::Interact);
 	if (PlayerCharacterInputConfig->ChangeViewAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->ChangeViewAction, ETriggerEvent::Started, this, &ThisClass::ChangeView);
 	if (PlayerCharacterInputConfig->ToggleSelectorAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->ToggleSelectorAction, ETriggerEvent::Started, this, &ThisClass::InputToggleSelector);
 	if (PlayerCharacterInputConfig->IronSightAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->IronSightAction, ETriggerEvent::Started, this, &ThisClass::IronSight);
 	if (PlayerCharacterInputConfig->IronSightAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->IronSightAction, ETriggerEvent::Completed, this, &ThisClass::IronSight);
-
+	if (PlayerCharacterInputConfig->MovementSkillAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->MovementSkillAction, ETriggerEvent::Started, this, &ThisClass::InputMovementSkill);
+	if (PlayerCharacterInputConfig->Skill1Action) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->Skill1Action, ETriggerEvent::Started, this, &ThisClass::InputSkill1);
+	if (PlayerCharacterInputConfig->Skill2Action) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->Skill2Action, ETriggerEvent::Started, this, &ThisClass::InputSkill2);
 }
 
 void ASXPlayerCharacter::Move(const FInputActionValue& Value)
@@ -192,7 +205,6 @@ void ASXPlayerCharacter::StartFire()
 
 void ASXPlayerCharacter::StopFire()
 {
-	UE_LOG(LogTemp, Warning, TEXT("End"));
 	GetWorldTimerManager().ClearTimer(FullAutoTimerHandle);
 }
 
@@ -212,6 +224,48 @@ void ASXPlayerCharacter::Reload()
 	CurrentWeapon->Reload();
 }
 
+void ASXPlayerCharacter::SetInteractionCandidate(UObject* NewInteractionCandidate)
+{
+	if (CurrentInteractionCandidate == NewInteractionCandidate)
+	{
+		return;
+	}
+
+	if (IsValid(NewInteractionCandidate) == true && NewInteractionCandidate->GetClass()->ImplementsInterface(USXInteractableInterface::StaticClass()) == false)
+	{
+		return;
+	}
+
+	CurrentInteractionCandidate = NewInteractionCandidate;
+	OnInteractionTargetChanged.Broadcast(CurrentInteractionCandidate);
+}
+
+void ASXPlayerCharacter::ClearInteractionCandidate(UObject* InteractionCandidateToClear)
+{
+	if (CurrentInteractionCandidate != InteractionCandidateToClear)
+	{
+		return;
+	}
+
+	CurrentInteractionCandidate = nullptr;
+	OnInteractionTargetChanged.Broadcast(nullptr);
+}
+
+void ASXPlayerCharacter::SetPickupCandidate(USXPickupComponent* NewPickupCandidate)
+{
+	SetInteractionCandidate(NewPickupCandidate);
+}
+
+void ASXPlayerCharacter::ClearPickupCandidate(USXPickupComponent* PickupCandidateToClear)
+{
+	ClearInteractionCandidate(PickupCandidateToClear);
+}
+
+USXPickupComponent* ASXPlayerCharacter::GetCurrentPickupCandidate() const
+{
+	return Cast<USXPickupComponent>(CurrentInteractionCandidate);
+}
+
 void ASXPlayerCharacter::Interact()
 {
 	if (!IsAlive())
@@ -219,7 +273,43 @@ void ASXPlayerCharacter::Interact()
 		return;
 	}
 
-	// Interaction component will be connected here when stage objects are added.
+	if (IsValid(CurrentInteractionCandidate.Get()) == true && CurrentInteractionCandidate->GetClass()->ImplementsInterface(USXInteractableInterface::StaticClass()) == true)
+	{
+		if (ISXInteractableInterface::Execute_CanInteract(CurrentInteractionCandidate, this) == true)
+		{
+			ISXInteractableInterface::Execute_Interact(CurrentInteractionCandidate, this);
+		}
+	}
+}
+
+void ASXPlayerCharacter::InputMovementSkill()
+{
+	if (!IsAlive() || IsValid(SkillComponent.Get()) == false)
+	{
+		return;
+	}
+
+	SkillComponent->ActivateSkill(ESXSkillSlot::Movement);
+}
+
+void ASXPlayerCharacter::InputSkill1()
+{
+	if (!IsAlive() || IsValid(SkillComponent.Get()) == false)
+	{
+		return;
+	}
+
+	SkillComponent->ActivateSkill(ESXSkillSlot::Skill1);
+}
+
+void ASXPlayerCharacter::InputSkill2()
+{
+	if (!IsAlive() || IsValid(SkillComponent.Get()) == false)
+	{
+		return;
+	}
+
+	SkillComponent->ActivateSkill(ESXSkillSlot::Skill2);
 }
 
 void ASXPlayerCharacter::TryFire()

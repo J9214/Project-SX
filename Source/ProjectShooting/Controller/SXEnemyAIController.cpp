@@ -44,18 +44,7 @@ void ASXEnemyAIController::UpdateAI()
 		return;
 	}
 
-	const float AttackRange = Enemy->GetAttackRange();
-	const float DistanceToTarget = FVector::Dist(Enemy->GetActorLocation(), TargetPawn->GetActorLocation());
-
-	if (DistanceToTarget > AttackRange)
-	{
-		MoveToActor(TargetPawn, FMath::Max(0.0f, AttackRange - AcceptanceRadiusPadding));
-		return;
-	}
-
-	StopMovement();
-	SetFocus(TargetPawn);
-	Enemy->TryAttack(TargetPawn);
+	Enemy->UpdateAIBehavior(this, TargetPawn);
 }
 
 APawn* ASXEnemyAIController::GetTargetPlayerPawn() const

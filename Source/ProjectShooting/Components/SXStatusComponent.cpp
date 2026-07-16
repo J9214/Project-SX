@@ -27,7 +27,7 @@ float USXStatusComponent::ApplyDamage(float DamageAmount, AActor* InstigatorActo
 	const float OldHealth = CurrentHealth;
 	CurrentHealth = FMath::Clamp(CurrentHealth - DamageAmount, 0.0f, MaxHealth);
 	const float AppliedDamage = OldHealth - CurrentHealth;
-
+ 
 	if (AppliedDamage > 0.0f)
 	{
 		OnHealthChanged.Broadcast(this, OldHealth, CurrentHealth, -AppliedDamage, InstigatorActor);
@@ -67,6 +67,19 @@ void USXStatusComponent::ResetHealth()
 	CurrentHealth = MaxHealth;
 }
 
+void USXStatusComponent::SetMaxHealth(float NewMaxHealth, bool bResetCurrentHealth)
+{
+	MaxHealth = FMath::Max(1.0f, NewMaxHealth);
+
+	if (bResetCurrentHealth)
+	{
+		ResetHealth();
+		return;
+	}
+
+	CurrentHealth = FMath::Clamp(CurrentHealth, 0.0f, MaxHealth);
+}
+
 bool USXStatusComponent::IsAlive() const
 {
 	return !bIsDead && CurrentHealth > 0.0f;
@@ -80,5 +93,49 @@ float USXStatusComponent::GetHealthRatio() const
 float USXStatusComponent::GetTimeBetweenFire() const
 {
 	return FirePerMinute > 0.0f ? 60.0f / FirePerMinute : 0.0f;
+}
+
+int32 USXStatusComponent::AddGold(int32 Amount)
+{
+	if (Amount <= 0)
+	{
+		return 0;
+	}
+
+	const int32 OldGold = Gold;
+	Gold += Amount;
+	const int32 AddedGold = Gold - OldGold;
+
+	OnGoldChanged.Broadcast(this, OldGold, Gold, AddedGold);
+	return AddedGold;
+}
+
+bool USXStatusComponent::SpendGold(int32 Amount)
+{
+	if (Amount <= 0 || Gold < Amount)
+	{
+		return false;
+	}
+
+	const int32 OldGold = Gold;
+	Gold -= Amount;
+
+	OnGoldChanged.Broadcast(this, OldGold, Gold, -Amount);
+	return true;
+}
+
+int32 USXStatusComponent::AddExperience(int32 Amount)
+{
+	if (Amount <= 0)
+	{
+		return 0;
+	}
+
+	const int32 OldExperience = Experience;
+	Experience += Amount;
+	const int32 AddedExperience = Experience - OldExperience;
+
+	OnExperienceChanged.Broadcast(this, OldExperience, Experience, AddedExperience);
+	return AddedExperience;
 }
 

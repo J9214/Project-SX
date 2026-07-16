@@ -48,4 +48,13 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SX|Input")
 	TObjectPtr<UInputAction> IronSightAction;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SX|Input|Skill")
+	TObjectPtr<UInputAction> MovementSkillAction;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SX|Input|Skill")
+	TObjectPtr<UInputAction> Skill1Action;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SX|Input|Skill")
+	TObjectPtr<UInputAction> Skill2Action;
 };

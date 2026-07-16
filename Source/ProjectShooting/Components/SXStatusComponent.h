@@ -10,6 +10,8 @@ class USXStatusComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_FiveParams(FSXOnStatusHealthChangedSignature, USXStatusComponent*, StatusComponent, float, OldHealth, float, NewHealth, float, Delta, AActor*, InstigatorActor);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FSXOnStatusDeathSignature, USXStatusComponent*, StatusComponent, AActor*, InstigatorActor);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FSXOnStatusGoldChangedSignature, USXStatusComponent*, StatusComponent, int32, OldGold, int32, NewGold, int32, Delta);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FSXOnStatusExperienceChangedSignature, USXStatusComponent*, StatusComponent, int32, OldExperience, int32, NewExperience, int32, Delta);
 
 UCLASS(ClassGroup=(SX), meta=(BlueprintSpawnableComponent))
 class PROJECTSHOOTING_API USXStatusComponent : public UActorComponent
@@ -29,6 +31,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="SX|Status|Health")
 	void ResetHealth();
+
+	UFUNCTION(BlueprintCallable, Category="SX|Status|Health")
+	void SetMaxHealth(float NewMaxHealth, bool bResetCurrentHealth = true);
 
 	UFUNCTION(BlueprintPure, Category="SX|Status|Health")
 	bool IsAlive() const;
@@ -54,11 +59,32 @@ public:
 	UFUNCTION(BlueprintPure, Category="SX|Status|Weapon")
 	float GetTimeBetweenFire() const;
 
+	UFUNCTION(BlueprintCallable, Category="SX|Status|Reward")
+	int32 AddGold(int32 Amount);
+
+	UFUNCTION(BlueprintCallable, Category="SX|Status|Reward")
+	bool SpendGold(int32 Amount);
+
+	UFUNCTION(BlueprintCallable, Category="SX|Status|Reward")
+	int32 AddExperience(int32 Amount);
+
+	UFUNCTION(BlueprintPure, Category="SX|Status|Reward")
+	int32 GetGold() const { return Gold; }
+
+	UFUNCTION(BlueprintPure, Category="SX|Status|Reward")
+	int32 GetExperience() const { return Experience; }
+
 	UPROPERTY(BlueprintAssignable, Category="SX|Status|Health")
 	FSXOnStatusHealthChangedSignature OnHealthChanged;
 
 	UPROPERTY(BlueprintAssignable, Category="SX|Status|Health")
 	FSXOnStatusDeathSignature OnDeath;
+
+	UPROPERTY(BlueprintAssignable, Category="SX|Status|Reward")
+	FSXOnStatusGoldChangedSignature OnGoldChanged;
+
+	UPROPERTY(BlueprintAssignable, Category="SX|Status|Reward")
+	FSXOnStatusExperienceChangedSignature OnExperienceChanged;
 
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="SX|Status|Health", meta=(ClampMin="1.0"))
@@ -78,4 +104,10 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="SX|Status|Weapon", meta=(ClampMin="1.0"))
 	float FirePerMinute = 600.0f;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="SX|Status|Reward")
+	int32 Gold = 0;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="SX|Status|Reward")
+	int32 Experience = 0;
 };

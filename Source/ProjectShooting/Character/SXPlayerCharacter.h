@@ -13,6 +13,10 @@ class USkeletalMeshComponent;
 class USpringArmComponent;
 class UCameraShakeBase;
 class USXInputConfig;
+class USXPickupComponent;
+class USXSkillComponent;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FSXOnInteractionTargetChangedSignature, UObject*, InteractableObject);
 
 UENUM(BlueprintType)
 enum class EViewMode : uint8
@@ -36,6 +40,27 @@ public:
 
 	virtual void Tick(float DeltaSeconds) override;
 
+	UFUNCTION(BlueprintCallable, Category="SX|Interaction")
+	void SetInteractionCandidate(UObject* NewInteractionCandidate);
+
+	UFUNCTION(BlueprintCallable, Category="SX|Interaction")
+	void ClearInteractionCandidate(UObject* InteractionCandidateToClear);
+
+	UFUNCTION(BlueprintCallable, Category="SX|Interaction")
+	void SetPickupCandidate(USXPickupComponent* NewPickupCandidate);
+
+	UFUNCTION(BlueprintCallable, Category="SX|Interaction")
+	void ClearPickupCandidate(USXPickupComponent* PickupCandidateToClear);
+
+	UFUNCTION(BlueprintPure, Category="SX|Interaction")
+	UObject* GetCurrentInteractionCandidate() const { return CurrentInteractionCandidate; }
+
+	UFUNCTION(BlueprintPure, Category="SX|Interaction")
+	USXPickupComponent* GetCurrentPickupCandidate() const;
+
+	UPROPERTY(BlueprintAssignable, Category="SX|Interaction")
+	FSXOnInteractionTargetChangedSignature OnInteractionTargetChanged;
+
 protected:
 	void Move(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
@@ -49,6 +74,9 @@ protected:
 	void AttackMelee();
 	void Reload();
 	void Interact();
+	void InputMovementSkill();
+	void InputSkill1();
+	void InputSkill2();
 
 	UFUNCTION(BlueprintCallable, Category="SX|View")
 	void ChangeView();
@@ -64,6 +92,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SX|Components")
 	TObjectPtr<USpringArmComponent> SpringArmComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="SX|Components")
+	TObjectPtr<USXSkillComponent> SkillComponent;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="SX|View")
 	FVector FirstPersonCameraLocation = FVector(0.0f, 0.0f, 64.0f);
@@ -84,6 +115,9 @@ protected:
 	EViewMode DefaultViewMode = EViewMode::BackView;
 
 	EViewMode CurrentViewMode = EViewMode::None;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="SX|Interaction")
+	TObjectPtr<UObject> CurrentInteractionCandidate;
 
 #pragma region Effect
 public:

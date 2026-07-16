@@ -21,6 +21,8 @@ ASXCharacterBase::ASXCharacterBase()
 	PrimaryActorTick.bCanEverTick = false;
 
 	StatusComponent = CreateDefaultSubobject<USXStatusComponent>(TEXT("StatusComponent"));
+
+	GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 }
 
 void ASXCharacterBase::BeginPlay()
@@ -52,6 +54,13 @@ void ASXCharacterBase::ReceiveDamage(float DamageAmount, AActor* DamageCauser)
 	const float AppliedDamage = StatusComponent->ApplyDamage(DamageAmount, DamageCauser);
 	if (AppliedDamage > 0.0f)
 	{
+		UE_LOG(LogTemp, Log, TEXT("%s received %.1f damage from %s. Health: %.1f / %.1f"),
+			*GetName(),
+			AppliedDamage,
+			*GetNameSafe(DamageCauser),
+			StatusComponent->GetHealth(),
+			StatusComponent->GetMaxHealth());
+
 		BP_OnDamaged(AppliedDamage, DamageCauser);
 	}
 }
