@@ -76,6 +76,23 @@ USXSkillBase* USXSkillComponent::GetSkillInstance(ESXSkillSlot SkillSlot) const
 	return SkillInstance != nullptr ? SkillInstance->Get() : nullptr;
 }
 
+USXSkillData* USXSkillComponent::GetEquippedSkillData(ESXSkillSlot SkillSlot) const
+{
+	return GetSkillData(SkillSlot);
+}
+
+UTexture2D* USXSkillComponent::GetSkillIcon(ESXSkillSlot SkillSlot) const
+{
+	const USXSkillData* SkillData = GetSkillData(SkillSlot);
+	return IsValid(SkillData) ? SkillData->SkillIcon.Get() : nullptr;
+}
+
+float USXSkillComponent::GetCooldownDuration(ESXSkillSlot SkillSlot) const
+{
+	const USXSkillData* SkillData = GetSkillData(SkillSlot);
+	return IsValid(SkillData) ? SkillData->Cooldown : 0.0f;
+}
+
 void USXSkillComponent::InitializeSkills()
 {
 	SkillInstances.Empty();

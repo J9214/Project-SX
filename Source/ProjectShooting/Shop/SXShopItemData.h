@@ -44,7 +44,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="SX|Shop|Ammo", meta=(ClampMin="1", EditCondition="ItemType == ESXShopItemType::Ammo", EditConditionHides))
 	int32 AmmoAmount = 30;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="SX|Shop|Ammo", meta=(EditCondition="ItemType == ESXShopItemType::AmmoType", EditConditionHides))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="SX|Shop|Ammo", meta=(EditCondition="ItemType == ESXShopItemType::Ammo || ItemType == ESXShopItemType::AmmoType", EditConditionHides))
 	ESXAmmoType AmmoType = ESXAmmoType::Normal;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="SX|Shop|Weapon", meta=(EditCondition="ItemType == ESXShopItemType::Weapon", EditConditionHides))

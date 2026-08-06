@@ -33,6 +33,32 @@ bool USXDashSkill::Activate()
 
 	const float DashStrength = IsValid(SkillData.Get()) == true ? SkillData->DashStrength : 1500.0f;
 
+	if (IsValid(SkillData.Get()))
+	{
+		const FVector LocalDashDirection = OwnerCharacter->GetActorTransform().InverseTransformVectorNoScale(DashDirection);
+		UAnimMontage* DashMontage = nullptr;
+
+		if (FMath::Abs(LocalDashDirection.X) >= FMath::Abs(LocalDashDirection.Y))
+		{
+			DashMontage = LocalDashDirection.X >= 0.0f
+				? SkillData->DashForwardMontage.Get()
+				: SkillData->DashBackwardMontage.Get();
+		}
+		else
+		{
+			DashMontage = LocalDashDirection.Y >= 0.0f
+				? SkillData->DashRightMontage.Get()
+				: SkillData->DashLeftMontage.Get();
+		}
+
+		// Keep the original Montage property usable as a common fallback.
+		UAnimMontage* MontageToPlay = DashMontage != nullptr ? DashMontage : SkillData->Montage.Get();
+		if (MontageToPlay != nullptr)
+		{
+			OwnerCharacter->PlayAnimMontage(MontageToPlay);
+		}
+	}
+
 	OwnerCharacter->LaunchCharacter(DashDirection * DashStrength, true, false);
 	EndSkill();
 

@@ -33,6 +33,12 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="SX|Ammo Pickup")
 	ESXAmmoType DesiredAmmoType = ESXAmmoType::Normal;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="SX|Ammo Pickup", meta=(ClampMin="1"))
+	int32 AmmoAmount = 30;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="SX|Ammo Pickup|Deprecated", meta=(DeprecatedProperty, DeprecationMessage="Ammo pickups no longer change the current weapon ammo type. Weapons have one fixed ammo type."))
+	bool bSetCurrentWeaponAmmoTypeOnPickup = false;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="SX|Ammo Pickup")
 	bool bDestroyOnPickup = true;
 };

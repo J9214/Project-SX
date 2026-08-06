@@ -16,7 +16,10 @@ ASXEnemyProjectile::ASXEnemyProjectile()
 	SetRootComponent(CollisionComponent);
 	CollisionComponent->SetSphereRadius(16.0f);
 	CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-	CollisionComponent->SetCollisionObjectType(ECC_WorldDynamic);
+	// Project collision channel 1 is named "Projectile" in DefaultEngine.ini.
+	// Keeping enemy projectiles on this dedicated channel lets player barriers
+	// stop enemy shots without also stopping the player's projectiles.
+	CollisionComponent->SetCollisionObjectType(ECC_GameTraceChannel1);
 	CollisionComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
 	CollisionComponent->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 	CollisionComponent->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Overlap);

@@ -9,6 +9,7 @@
 
 class USXSkillBase;
 class USXSkillData;
+class UTexture2D;
 
 UCLASS(ClassGroup=(SX), meta=(BlueprintSpawnableComponent))
 class PROJECTSHOOTING_API USXSkillComponent : public UActorComponent
@@ -37,6 +38,15 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="SX|Skill")
 	USXSkillBase* GetSkillInstance(ESXSkillSlot SkillSlot) const;
+
+	UFUNCTION(BlueprintPure, Category="SX|Skill|UI")
+	USXSkillData* GetEquippedSkillData(ESXSkillSlot SkillSlot) const;
+
+	UFUNCTION(BlueprintPure, Category="SX|Skill|UI")
+	UTexture2D* GetSkillIcon(ESXSkillSlot SkillSlot) const;
+
+	UFUNCTION(BlueprintPure, Category="SX|Skill|UI")
+	float GetCooldownDuration(ESXSkillSlot SkillSlot) const;
 
 protected:
 	void InitializeSkills();

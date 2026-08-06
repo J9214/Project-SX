@@ -3,10 +3,12 @@
 #include "Character/SXEnemyRanged.h"
 
 #include "Components/SXStatusComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Controller/SXEnemyAIController.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Item/SXEnemyProjectile.h"
+#include "TimerManager.h"
 
 ASXEnemyRanged::ASXEnemyRanged()
 {
@@ -56,7 +58,7 @@ void ASXEnemyRanged::UpdateAIBehavior(ASXEnemyAIController* AIController, APawn*
 
 bool ASXEnemyRanged::TryRangedAttack(APawn* TargetPawn)
 {
-	if (IsValid(TargetPawn) == false || IsAlive() == false || IsValid(ProjectileClass) == false)
+	if (IsValid(TargetPawn) == false || IsAlive() == false || bIsAttacking || IsValid(ProjectileClass) == false)
 	{
 		return false;
 	}
@@ -68,9 +70,74 @@ bool ASXEnemyRanged::TryRangedAttack(APawn* TargetPawn)
 	}
 
 	LastAttackTime = CurrentTime;
+	bIsAttacking = true;
+	bHasFiredProjectileThisAttack = false;
+	CurrentRangedTarget = TargetPawn;
+	FaceRangedTarget();
 
-	const FVector SpawnLocation = GetActorLocation() + GetActorRotation().RotateVector(ProjectileSpawnOffset);
-	const FVector AimLocation = TargetPawn->GetActorLocation() + FVector(0.0f, 0.0f, 50.0f);
+	const float AttackDuration = PlayAnimMontage(AttackMeleeMontage);
+	if (AttackDuration > 0.0f)
+	{
+		GetWorldTimerManager().SetTimer(
+			AttackFinishTimerHandle,
+			this,
+			&ThisClass::FinishAttack,
+			AttackDuration,
+			false
+		);
+	}
+	else
+	{
+		// Keep the ranged enemy functional until an attack montage is assigned.
+		HandleProjectileFireNotify();
+		FinishAttack();
+	}
+
+	return true;
+}
+
+void ASXEnemyRanged::HandleProjectileFireNotify()
+{
+	if (IsAlive() == false || bIsAttacking == false || bHasFiredProjectileThisAttack || IsValid(CurrentRangedTarget) == false)
+	{
+		return;
+	}
+
+	// The target may have moved during the attack wind-up. Face it again at
+	// the exact notify frame so the projectile never appears to fire backward.
+	FaceRangedTarget();
+	bHasFiredProjectileThisAttack = true;
+	SpawnProjectile();
+}
+
+void ASXEnemyRanged::FaceRangedTarget()
+{
+	if (IsValid(CurrentRangedTarget) == false)
+	{
+		return;
+	}
+
+	FVector ToTarget = CurrentRangedTarget->GetActorLocation() - GetActorLocation();
+	ToTarget.Z = 0.0f;
+	if (ToTarget.IsNearlyZero())
+	{
+		return;
+	}
+
+	SetActorRotation(FRotator(0.0f, ToTarget.Rotation().Yaw, 0.0f));
+}
+
+bool ASXEnemyRanged::SpawnProjectile()
+{
+	if (IsValid(ProjectileClass) == false || IsValid(CurrentRangedTarget) == false || IsValid(GetMesh()) == false)
+	{
+		return false;
+	}
+
+	const FVector SpawnLocation = GetMesh()->DoesSocketExist(ProjectileSocketName)
+		? GetMesh()->GetSocketLocation(ProjectileSocketName)
+		: GetActorLocation() + GetActorRotation().RotateVector(ProjectileSpawnOffset);
+	const FVector AimLocation = CurrentRangedTarget->GetActorLocation() + FVector(0.0f, 0.0f, 50.0f);
 	const FRotator SpawnRotation = (AimLocation - SpawnLocation).Rotation();
 
 	FActorSpawnParameters SpawnParams;
@@ -92,4 +159,12 @@ bool ASXEnemyRanged::TryRangedAttack(APawn* TargetPawn)
 	}
 
 	return false;
+}
+
+void ASXEnemyRanged::FinishAttack()
+{
+	Super::FinishAttack();
+
+	CurrentRangedTarget = nullptr;
+	bHasFiredProjectileThisAttack = false;
 }

@@ -30,13 +30,15 @@ void USXAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		ShouldMove = false;
 		IsFalling = false;
 		IsUnarmed = true;
+		WeaponType = ESXWeaponType::Unarmed;
 		return;
 	}
 
 	Velocity = MovementComponent->Velocity;
 	GroundSpeed = Velocity.Size2D();
 	IsFalling = MovementComponent->IsFalling();
-	IsUnarmed = Character->CurrentWeapon == nullptr;
+	WeaponType = Character->GetCurrentWeaponType();
+	IsUnarmed = WeaponType == ESXWeaponType::Unarmed;
 
 	if (GroundSpeed > KINDA_SMALL_NUMBER)
 	{

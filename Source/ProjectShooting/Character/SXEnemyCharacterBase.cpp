@@ -5,18 +5,29 @@
 
 #include "Controller/SXEnemyAIController.h"
 #include "Engine/DamageEvents.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Item/SXCollectiblePickup.h"
+#include "Item/SXDropDatabase.h"
+#include "TimerManager.h"
+
+FSXOnEnemyKilledNativeSignature ASXEnemyCharacterBase::OnEnemyKilledNative;
 
 ASXEnemyCharacterBase::ASXEnemyCharacterBase()
 {
 	AIControllerClass = ASXEnemyAIController::StaticClass();
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
+
+	bUseControllerRotationYaw = false;
+	GetCharacterMovement()->bOrientRotationToMovement = true;
+
+	bUseDeathDissolve = true;
+	bDestroyAfterDeathDissolve = true;
 }
 
 bool ASXEnemyCharacterBase::TryAttack(AActor* TargetActor)
 {
-	if (IsAlive() == false || IsValid(TargetActor) == false)
+	if (IsAlive() == false || bIsAttacking || IsValid(TargetActor) == false)
 	{
 		return false;
 	}
@@ -40,16 +51,77 @@ bool ASXEnemyCharacterBase::TryAttack(AActor* TargetActor)
 	}
 
 	LastAttackTime = CurrentTime;
+	bIsAttacking = true;
+	bHasAppliedDamageThisAttack = false;
+	CurrentAttackTarget = TargetCharacter;
+
+	const float AttackDuration = PlayAnimMontage(AttackMeleeMontage);
+	if (AttackDuration > 0.0f)
+	{
+		GetWorldTimerManager().SetTimer(
+			AttackFinishTimerHandle,
+			this,
+			&ThisClass::FinishAttack,
+			AttackDuration,
+			false
+		);
+	}
+	else
+	{
+		// Preserve functional attacks for enemy blueprints that do not have
+		// an attack montage assigned yet.
+		HandleAttackHitNotify();
+		FinishAttack();
+	}
+
+	return true;
+}
+
+void ASXEnemyCharacterBase::HandleAttackHitNotify()
+{
+	if (IsAlive() == false || bIsAttacking == false || bHasAppliedDamageThisAttack)
+	{
+		return;
+	}
+
+	ASXCharacterBase* TargetCharacter = CurrentAttackTarget.Get();
+	if (IsValid(TargetCharacter) == false || TargetCharacter->IsAlive() == false)
+	{
+		return;
+	}
+
+	const float DistanceToTarget = FVector::Dist(GetActorLocation(), TargetCharacter->GetActorLocation());
+	if (DistanceToTarget > AttackRange)
+	{
+		return;
+	}
+
+	bHasAppliedDamageThisAttack = true;
 
 	FDamageEvent DamageEvent;
 	TargetCharacter->TakeDamage(AttackDamage, DamageEvent, GetController(), this);
-	return true;
+}
+
+void ASXEnemyCharacterBase::FinishAttack()
+{
+	GetWorldTimerManager().ClearTimer(AttackFinishTimerHandle);
+
+	bIsAttacking = false;
+	bHasAppliedDamageThisAttack = false;
+	CurrentAttackTarget = nullptr;
 }
 
 void ASXEnemyCharacterBase::UpdateAIBehavior(ASXEnemyAIController* AIController, APawn* TargetPawn)
 {
 	if (IsValid(AIController) == false || IsAlive() == false || IsValid(TargetPawn) == false)
 	{
+		return;
+	}
+
+	if (bIsAttacking)
+	{
+		AIController->StopMovement();
+		AIController->SetFocus(TargetPawn);
 		return;
 	}
 
@@ -69,13 +141,32 @@ void ASXEnemyCharacterBase::Die(AActor* DamageCauser)
 {
 	const bool bWasAlive = bIsDead == false;
 
+	GetWorldTimerManager().ClearTimer(AttackFinishTimerHandle);
+	StopAnimMontage(AttackMeleeMontage);
+	bIsAttacking = false;
+	bHasAppliedDamageThisAttack = false;
+	CurrentAttackTarget = nullptr;
+
 	Super::Die(DamageCauser);
 
 	if (bWasAlive)
 	{
 		SpawnDropItems(DamageCauser);
 		OnEnemyDeath.Broadcast(this);
+		OnEnemyKilledNative.Broadcast(this, DamageCauser);
 	}
+}
+
+void ASXEnemyCharacterBase::SetDropModifier(const FSXDropModifier& InDropModifier)
+{
+	DropModifier = InDropModifier;
+}
+
+void ASXEnemyCharacterBase::SetDropDatabaseContext(USXDropDatabase* InDropDatabase, FName InDropStageId, int32 InDropWaveNumber)
+{
+	DropDatabase = InDropDatabase;
+	DropStageId = InDropStageId;
+	DropWaveNumber = InDropWaveNumber;
 }
 
 void ASXEnemyCharacterBase::SpawnDropItems(AActor* DamageCauser)
@@ -86,9 +177,40 @@ void ASXEnemyCharacterBase::SpawnDropItems(AActor* DamageCauser)
 		return;
 	}
 
-	for (const FSXDropItemData& DropItemData : DropItemList)
+	TArray<FSXDropItemData> FinalDropItemList = DropItemList;
+	FSXDropModifier FinalDropModifier = DropModifier;
+	if (IsValid(DropDatabase.Get()))
 	{
-		if (DropItemData.DropActorClass == nullptr || FMath::FRand() > DropItemData.DropChance)
+		DropDatabase->BuildDropData(GetClass(), DropStageId, DropWaveNumber, DropItemList, DropModifier, FinalDropItemList, FinalDropModifier);
+	}
+
+	for (const FSXDropItemData& DropItemData : FinalDropItemList)
+	{
+		float FinalDropChance = DropItemData.DropChance * FinalDropModifier.GlobalDropChanceMultiplier;
+		if (DropItemData.bOverrideCollectible)
+		{
+			switch (DropItemData.CollectibleType)
+			{
+			case ESXCollectibleType::Gold:
+				FinalDropChance *= FinalDropModifier.GoldDropChanceMultiplier;
+				break;
+			case ESXCollectibleType::Ammo:
+				FinalDropChance *= FinalDropModifier.AmmoDropChanceMultiplier;
+				break;
+			case ESXCollectibleType::Experience:
+				FinalDropChance *= FinalDropModifier.ExperienceDropChanceMultiplier;
+				break;
+			default:
+				break;
+			}
+		}
+		else
+		{
+			FinalDropChance *= FinalDropModifier.OtherDropChanceMultiplier;
+		}
+
+		FinalDropChance = FMath::Clamp(FinalDropChance, 0.0f, 1.0f);
+		if (DropItemData.DropActorClass == nullptr || FMath::FRand() > FinalDropChance)
 		{
 			continue;
 		}
@@ -116,7 +238,29 @@ void ASXEnemyCharacterBase::SpawnDropItems(AActor* DamageCauser)
 			{
 				const int32 MinAmount = FMath::Max(1, DropItemData.MinAmount);
 				const int32 MaxAmount = FMath::Max(MinAmount, DropItemData.MaxAmount);
-				CollectiblePickup->InitializeCollectible(DropItemData.CollectibleType, FMath::RandRange(MinAmount, MaxAmount));
+				float AmountMultiplier = 1.0f;
+				if (DropItemData.CollectibleType == ESXCollectibleType::Ammo)
+				{
+					AmountMultiplier = FinalDropModifier.AmmoAmountMultiplier;
+				}
+				else if (DropItemData.CollectibleType == ESXCollectibleType::Gold)
+				{
+					AmountMultiplier = FinalDropModifier.GoldAmountMultiplier;
+				}
+				else if (DropItemData.CollectibleType == ESXCollectibleType::Experience)
+				{
+					AmountMultiplier = FinalDropModifier.ExperienceAmountMultiplier;
+				}
+
+				const int32 DropAmount = FMath::Max(1, FMath::RoundToInt(FMath::RandRange(MinAmount, MaxAmount) * AmountMultiplier));
+				if (DropItemData.CollectibleType == ESXCollectibleType::Ammo)
+				{
+					CollectiblePickup->InitializeAmmoCollectible(DropItemData.AmmoType, DropAmount);
+				}
+				else
+				{
+					CollectiblePickup->InitializeCollectible(DropItemData.CollectibleType, DropAmount);
+				}
 			}
 		}
 	}

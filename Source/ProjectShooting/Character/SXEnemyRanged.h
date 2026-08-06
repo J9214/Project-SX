@@ -18,9 +18,15 @@ public:
 	ASXEnemyRanged();
 
 	virtual void UpdateAIBehavior(ASXEnemyAIController* AIController, APawn* TargetPawn) override;
+	virtual void FinishAttack() override;
+
+	UFUNCTION(BlueprintCallable, Category="SX|Enemy|Ranged")
+	void HandleProjectileFireNotify();
 
 protected:
 	bool TryRangedAttack(APawn* TargetPawn);
+	bool SpawnProjectile();
+	void FaceRangedTarget();
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="SX|Enemy|Ranged")
 	TSubclassOf<ASXEnemyProjectile> ProjectileClass;
@@ -39,4 +45,13 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="SX|Enemy|Ranged")
 	FVector ProjectileSpawnOffset = FVector(80.0f, 0.0f, 70.0f);
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="SX|Enemy|Ranged")
+	FName ProjectileSocketName = TEXT("ProjectileSocket");
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="SX|Enemy|Ranged")
+	TObjectPtr<APawn> CurrentRangedTarget;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="SX|Enemy|Ranged")
+	bool bHasFiredProjectileThisAttack = false;
 };

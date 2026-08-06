@@ -11,7 +11,8 @@ enum class ESXSkillType : uint8
 	Attack,
 	Defense,
 	Utility,
-	Movement
+	Movement,
+	WorldDistortion
 };
 
 UENUM(BlueprintType)

@@ -7,11 +7,16 @@
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "Blueprint/UserWidget.h"
+#include "Blueprint/WidgetTree.h"
 #include "Character/SXCharacterBase.h"
+#include "Character/SXEnemyCharacterBase.h"
 #include "Components/SXStatusComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "Stage/SXStageFlowManager.h"
 #include "Stage/SXWaveSpawner.h"
+#include "TimerManager.h"
+#include "UI/SXWaveStatusWidget.h"
 
 ASXPlayerController::ASXPlayerController()
 {
@@ -38,14 +43,82 @@ void ASXPlayerController::BeginPlay()
 		CreateGameHUD();
 	}
 
-	BindControlledPawnDeath();
+	ResetStageResultStats();
+	BindControlledPawnResultStats();
+	BindStageFlowManager();
+	EnemyKilledDelegateHandle = ASXEnemyCharacterBase::OnEnemyKilledNative.AddUObject(this, &ThisClass::HandleEnemyKilled);
+}
+
+void ASXPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	GetWorldTimerManager().ClearTimer(GameOverDelayTimerHandle);
+
+	if (EnemyKilledDelegateHandle.IsValid())
+	{
+		ASXEnemyCharacterBase::OnEnemyKilledNative.Remove(EnemyKilledDelegateHandle);
+		EnemyKilledDelegateHandle.Reset();
+	}
+
+	if (IsValid(BoundStageFlowManager))
+	{
+		BoundStageFlowManager->OnStageStarted.RemoveDynamic(this, &ThisClass::HandleStageStarted);
+		BoundStageFlowManager->OnStageCleared.RemoveDynamic(this, &ThisClass::HandleStageCleared);
+	}
+
+	if (ASXCharacterBase* ControlledCharacter = Cast<ASXCharacterBase>(GetPawn()))
+	{
+		if (USXStatusComponent* StatusComponent = ControlledCharacter->GetStatusComponent())
+		{
+			StatusComponent->OnDeath.RemoveDynamic(this, &ThisClass::HandleControlledPawnDeath);
+			StatusComponent->OnGoldChanged.RemoveDynamic(this, &ThisClass::HandleControlledPawnGoldChanged);
+		}
+	}
+
+	Super::EndPlay(EndPlayReason);
 }
 
 void ASXPlayerController::OnPossess(APawn* InPawn)
 {
 	Super::OnPossess(InPawn);
 
-	BindControlledPawnDeath();
+	BindControlledPawnResultStats();
+}
+
+void ASXPlayerController::ResetStageResultStats()
+{
+	StageResultKills = 0;
+	StageResultGold = 0;
+	StageResultFrozenTime = 0.0f;
+	bStageResultTimeFrozen = false;
+	bGameOverShown = false;
+	bStageClearResultShown = false;
+
+	UWorld* World = GetWorld();
+	StageResultStartTime = IsValid(World) ? World->GetTimeSeconds() : 0.0f;
+}
+
+void ASXPlayerController::AddStageResultKill(int32 Count)
+{
+	StageResultKills = FMath::Max(0, StageResultKills + Count);
+}
+
+FSXStageResultStats ASXPlayerController::GetStageResultStats() const
+{
+	FSXStageResultStats ResultStats;
+	ResultStats.Kills = StageResultKills;
+	ResultStats.Gold = StageResultGold;
+
+	if (bStageResultTimeFrozen)
+	{
+		ResultStats.TimeSeconds = StageResultFrozenTime;
+	}
+	else if (const UWorld* World = GetWorld())
+	{
+		ResultStats.TimeSeconds = FMath::Max(0.0f, World->GetTimeSeconds() - StageResultStartTime);
+	}
+
+	ResultStats.TimeText = FormatResultTime(ResultStats.TimeSeconds);
+	return ResultStats;
 }
 
 void ASXPlayerController::SetupInputComponent()
@@ -90,6 +163,31 @@ void ASXPlayerController::CreateGameHUD()
 	}
 }
 
+void ASXPlayerController::ShowHitMarker(bool bKilled)
+{
+	BP_OnHitMarker(bKilled);
+
+	if (IsValid(CrosshairWidgetInstance) == false)
+	{
+		return;
+	}
+
+	UFunction* ShowHitMarkerFunction = CrosshairWidgetInstance->FindFunction(TEXT("ShowHitMarker"));
+	if (ShowHitMarkerFunction == nullptr)
+	{
+		return;
+	}
+
+	struct FShowHitMarkerParams
+	{
+		bool bKilled = false;
+	};
+
+	FShowHitMarkerParams Params;
+	Params.bKilled = bKilled;
+	CrosshairWidgetInstance->ProcessEvent(ShowHitMarkerFunction, &Params);
+}
+
 void ASXPlayerController::BindControlledPawnDeath()
 {
 	ASXCharacterBase* ControlledCharacter = Cast<ASXCharacterBase>(GetPawn());
@@ -106,6 +204,117 @@ void ASXPlayerController::BindControlledPawnDeath()
 
 	StatusComponent->OnDeath.RemoveDynamic(this, &ThisClass::HandleControlledPawnDeath);
 	StatusComponent->OnDeath.AddDynamic(this, &ThisClass::HandleControlledPawnDeath);
+}
+
+void ASXPlayerController::BindControlledPawnResultStats()
+{
+	ASXCharacterBase* ControlledCharacter = Cast<ASXCharacterBase>(GetPawn());
+	if (IsValid(ControlledCharacter) == false)
+	{
+		return;
+	}
+
+	USXStatusComponent* StatusComponent = ControlledCharacter->GetStatusComponent();
+	if (IsValid(StatusComponent) == false)
+	{
+		return;
+	}
+
+	StatusComponent->OnDeath.RemoveDynamic(this, &ThisClass::HandleControlledPawnDeath);
+	StatusComponent->OnDeath.AddDynamic(this, &ThisClass::HandleControlledPawnDeath);
+
+	StatusComponent->OnGoldChanged.RemoveDynamic(this, &ThisClass::HandleControlledPawnGoldChanged);
+	StatusComponent->OnGoldChanged.AddDynamic(this, &ThisClass::HandleControlledPawnGoldChanged);
+}
+
+void ASXPlayerController::HandleControlledPawnGoldChanged(USXStatusComponent* StatusComponent, int32 OldGold, int32 NewGold, int32 Delta)
+{
+	if (Delta <= 0 || bGameOverShown || bStageClearResultShown)
+	{
+		return;
+	}
+
+	StageResultGold += Delta;
+}
+
+void ASXPlayerController::BindStageFlowManager()
+{
+	ASXStageFlowManager* StageFlowManager = Cast<ASXStageFlowManager>(UGameplayStatics::GetActorOfClass(this, ASXStageFlowManager::StaticClass()));
+	if (IsValid(StageFlowManager) == false)
+	{
+		return;
+	}
+
+	BindStageFlowManager(StageFlowManager);
+}
+
+void ASXPlayerController::BindStageFlowManager(ASXStageFlowManager* StageFlowManager)
+{
+	if (IsValid(StageFlowManager) == false)
+	{
+		return;
+	}
+
+	if (BoundStageFlowManager == StageFlowManager)
+	{
+		RefreshWaveStatusWidgets();
+		return;
+	}
+
+	if (IsValid(BoundStageFlowManager))
+	{
+		BoundStageFlowManager->OnStageStarted.RemoveDynamic(this, &ThisClass::HandleStageStarted);
+		BoundStageFlowManager->OnStageCleared.RemoveDynamic(this, &ThisClass::HandleStageCleared);
+	}
+
+	BoundStageFlowManager = StageFlowManager;
+	BoundStageFlowManager->OnStageStarted.AddUniqueDynamic(this, &ThisClass::HandleStageStarted);
+	BoundStageFlowManager->OnStageCleared.AddUniqueDynamic(this, &ThisClass::HandleStageCleared);
+
+	RefreshWaveStatusWidgets();
+	BoundStageFlowManager->BroadcastStageState();
+}
+
+void ASXPlayerController::SetActiveStageFlowManager(ASXStageFlowManager* NewStageFlowManager)
+{
+	BindStageFlowManager(NewStageFlowManager);
+}
+
+void ASXPlayerController::RefreshWaveStatusWidgets()
+{
+	if (IsValid(GameHUDWidgetInstance) == false)
+	{
+		return;
+	}
+
+	TArray<UWidget*> ChildWidgets;
+	if (IsValid(GameHUDWidgetInstance->WidgetTree))
+	{
+		GameHUDWidgetInstance->WidgetTree->GetAllWidgets(ChildWidgets);
+	}
+
+	if (USXWaveStatusWidget* RootWaveStatusWidget = Cast<USXWaveStatusWidget>(GameHUDWidgetInstance.Get()))
+	{
+		RootWaveStatusWidget->InitWaveStatus(BoundStageFlowManager.Get(), IsValid(BoundStageFlowManager) ? BoundStageFlowManager->GetWaveSpawner() : nullptr);
+	}
+
+	for (UWidget* ChildWidget : ChildWidgets)
+	{
+		if (USXWaveStatusWidget* WaveStatusWidget = Cast<USXWaveStatusWidget>(ChildWidget))
+		{
+			WaveStatusWidget->InitWaveStatus(BoundStageFlowManager.Get(), IsValid(BoundStageFlowManager) ? BoundStageFlowManager->GetWaveSpawner() : nullptr);
+		}
+	}
+}
+
+void ASXPlayerController::HandleEnemyKilled(ASXEnemyCharacterBase* DeadEnemy, AActor* DamageCauser)
+{
+	if (IsValid(DeadEnemy) == false || bGameOverShown || bStageClearResultShown)
+	{
+		return;
+	}
+
+	AddStageResultKill(1);
 }
 
 bool ASXPlayerController::ShouldCreateGameHUDOnBeginPlay() const
@@ -323,12 +532,14 @@ void ASXPlayerController::ReturnToMainMenu()
 		return;
 	}
 
+	GetWorldTimerManager().ClearTimer(GameOverDelayTimerHandle);
 	SetPause(false);
 	UGameplayStatics::OpenLevel(this, MainMenuLevelName);
 }
 
 void ASXPlayerController::RestartCurrentLevel()
 {
+	GetWorldTimerManager().ClearTimer(GameOverDelayTimerHandle);
 	SetPause(false);
 
 	const FName CurrentLevelName(*UGameplayStatics::GetCurrentLevelName(this, true));
@@ -337,6 +548,8 @@ void ASXPlayerController::RestartCurrentLevel()
 
 void ASXPlayerController::ShowGameOver()
 {
+	GetWorldTimerManager().ClearTimer(GameOverDelayTimerHandle);
+
 	if (bGameOverShown)
 	{
 		return;
@@ -349,6 +562,7 @@ void ASXPlayerController::ShowGameOver()
 	}
 
 	bGameOverShown = true;
+	ApplyResultStatsToWidget(GameOverWidget);
 	GameOverWidget->SetVisibility(ESlateVisibility::Visible);
 	SetMenuInputMode(GameOverWidget);
 	SetGameplayInputEnabled(false);
@@ -363,9 +577,92 @@ void ASXPlayerController::ShowGameOver()
 	}
 }
 
+void ASXPlayerController::ShowStageClearResult()
+{
+	if (bStageClearResultShown)
+	{
+		return;
+	}
+
+	UUserWidget* StageClearWidget = CreateMenuWidget(StageClearWidgetClass, StageClearWidgetInstance, 30);
+	if (IsValid(StageClearWidget) == false)
+	{
+		return;
+	}
+
+	bStageClearResultShown = true;
+	ApplyResultStatsToWidget(StageClearWidget);
+	StageClearWidget->SetVisibility(ESlateVisibility::Visible);
+	SetMenuInputMode(StageClearWidget);
+	SetGameplayInputEnabled(false);
+
+	if (bPauseOnStageClearResult)
+	{
+		SetPause(true);
+	}
+}
+
+void ASXPlayerController::HideStageClearResult()
+{
+	if (IsValid(StageClearWidgetInstance))
+	{
+		StageClearWidgetInstance->SetVisibility(ESlateVisibility::Collapsed);
+	}
+
+	bStageClearResultShown = false;
+	SetPause(false);
+	SetGameplayInputEnabled(true);
+}
+
 void ASXPlayerController::HandleControlledPawnDeath(USXStatusComponent* StatusComponent, AActor* InstigatorActor)
 {
+	GetWorldTimerManager().ClearTimer(GameOverDelayTimerHandle);
+
+	if (bStageResultTimeFrozen == false)
+	{
+		const UWorld* World = GetWorld();
+		StageResultFrozenTime = IsValid(World) ? FMath::Max(0.0f, World->GetTimeSeconds() - StageResultStartTime) : 0.0f;
+		bStageResultTimeFrozen = true;
+	}
+
+	if (GameOverDelayAfterDeath <= 0.0f)
+	{
+		ShowGameOver();
+		return;
+	}
+
+	GetWorldTimerManager().SetTimer(
+		GameOverDelayTimerHandle,
+		this,
+		&ThisClass::ShowGameOverAfterDeathDelay,
+		GameOverDelayAfterDeath,
+		false
+	);
+}
+
+void ASXPlayerController::ShowGameOverAfterDeathDelay()
+{
 	ShowGameOver();
+}
+
+void ASXPlayerController::HandleStageStarted()
+{
+	if (bResetResultStatsOnStageStart)
+	{
+		ResetStageResultStats();
+	}
+}
+
+void ASXPlayerController::HandleStageCleared()
+{
+	if (bStageResultTimeFrozen == false)
+	{
+		const UWorld* World = GetWorld();
+		StageResultFrozenTime = IsValid(World) ? FMath::Max(0.0f, World->GetTimeSeconds() - StageResultStartTime) : 0.0f;
+		bStageResultTimeFrozen = true;
+	}
+
+	ShowStageClearResult();
 }
 
 void ASXPlayerController::QuitGame()
@@ -419,4 +716,54 @@ UUserWidget* ASXPlayerController::CreateMenuWidget(TSubclassOf<UUserWidget> Widg
 	}
 
 	return WidgetInstance;
+}
+
+void ASXPlayerController::ApplyResultStatsToWidget(UUserWidget* ResultWidget)
+{
+	if (IsValid(ResultWidget) == false)
+	{
+		return;
+	}
+
+	const FSXStageResultStats ResultStats = GetStageResultStats();
+
+	if (UFunction* SetResultStatsFunction = ResultWidget->FindFunction(TEXT("SetResultStats")))
+	{
+		struct FSetResultStatsParams
+		{
+			FSXStageResultStats ResultStats;
+		};
+
+		FSetResultStatsParams Params;
+		Params.ResultStats = ResultStats;
+		ResultWidget->ProcessEvent(SetResultStatsFunction, &Params);
+		return;
+	}
+
+	if (UFunction* UpdateResultStatsFunction = ResultWidget->FindFunction(TEXT("UpdateResultStats")))
+	{
+		struct FUpdateResultStatsParams
+		{
+			int32 Kills = 0;
+			int32 Gold = 0;
+			float TimeSeconds = 0.0f;
+			FText TimeText;
+		};
+
+		FUpdateResultStatsParams Params;
+		Params.Kills = ResultStats.Kills;
+		Params.Gold = ResultStats.Gold;
+		Params.TimeSeconds = ResultStats.TimeSeconds;
+		Params.TimeText = ResultStats.TimeText;
+		ResultWidget->ProcessEvent(UpdateResultStatsFunction, &Params);
+	}
+}
+
+FText ASXPlayerController::FormatResultTime(float TimeSeconds) const
+{
+	const int32 TotalSeconds = FMath::Max(0, FMath::FloorToInt(TimeSeconds));
+	const int32 Minutes = TotalSeconds / 60;
+	const int32 Seconds = TotalSeconds % 60;
+
+	return FText::FromString(FString::Printf(TEXT("%02d:%02d"), Minutes, Seconds));
 }

@@ -72,6 +72,14 @@ void ASXStageFlowManager::LogActiveWaveData() const
 			WaveData.TimeLimit,
 			WaveData.bBossWave ? TEXT("true") : TEXT("false"));
 
+		UE_LOG(LogTemp, Log, TEXT("    DropModifier: GlobalChance=%.2f, GoldChance=%.2f, GoldAmount=%.2f, AmmoChance=%.2f, AmmoAmount=%.2f, OtherChance=%.2f"),
+			WaveData.DropModifier.GlobalDropChanceMultiplier,
+			WaveData.DropModifier.GoldDropChanceMultiplier,
+			WaveData.DropModifier.GoldAmountMultiplier,
+			WaveData.DropModifier.AmmoDropChanceMultiplier,
+			WaveData.DropModifier.AmmoAmountMultiplier,
+			WaveData.DropModifier.OtherDropChanceMultiplier);
+
 		for (int32 EntryIndex = 0; EntryIndex < WaveData.Enemies.Num(); ++EntryIndex)
 		{
 			const FSXWaveEnemySpawnData& SpawnData = WaveData.Enemies[EntryIndex];
@@ -102,9 +110,10 @@ void ASXStageFlowManager::StartStage()
 	bStageCleared = false;
 	bStageFailed = false;
 	CurrentStageWaveIndex = INDEX_NONE;
+	CurrentWaveSpawnCount = 0;
 
 	GetWorldTimerManager().ClearTimer(NextWaveTimerHandle);
-	GetWorldTimerManager().ClearTimer(WaveTimeLimitTimerHandle);
+	GetWorldTimerManager().ClearTimer(WaveAdvanceTimerHandle);
 
 	if (IsValid(EntranceDoor))
 	{
@@ -134,9 +143,10 @@ void ASXStageFlowManager::FailStage()
 
 	bStageFailed = true;
 	bStageStarted = false;
+	CurrentWaveSpawnCount = 0;
 
 	GetWorldTimerManager().ClearTimer(NextWaveTimerHandle);
-	GetWorldTimerManager().ClearTimer(WaveTimeLimitTimerHandle);
+	GetWorldTimerManager().ClearTimer(WaveAdvanceTimerHandle);
 
 	OnStageFailed.Broadcast();
 }
@@ -150,9 +160,10 @@ void ASXStageFlowManager::ClearStage()
 
 	bStageCleared = true;
 	bStageStarted = false;
+	CurrentWaveSpawnCount = 0;
 
 	GetWorldTimerManager().ClearTimer(NextWaveTimerHandle);
-	GetWorldTimerManager().ClearTimer(WaveTimeLimitTimerHandle);
+	GetWorldTimerManager().ClearTimer(WaveAdvanceTimerHandle);
 
 	if (IsValid(ExitDoor))
 	{
@@ -169,12 +180,22 @@ void ASXStageFlowManager::HandleWaveCleared(int32 WaveIndex)
 		return;
 	}
 
-	GetWorldTimerManager().ClearTimer(WaveTimeLimitTimerHandle);
+	GetWorldTimerManager().ClearTimer(WaveAdvanceTimerHandle);
 
 	const TArray<FSXStageWaveData>& ActiveStageWaves = GetActiveStageWaves();
 	if (CurrentStageWaveIndex >= ActiveStageWaves.Num() - 1)
 	{
 		ClearStage();
+		return;
+	}
+
+	StartNextWave();
+}
+
+void ASXStageFlowManager::HandleWaveAdvanceTimeElapsed()
+{
+	if (bStageFailed || bStageCleared)
+	{
 		return;
 	}
 
@@ -215,7 +236,10 @@ void ASXStageFlowManager::StartNextWave()
 	const TArray<FSXStageWaveData>& ActiveStageWaves = GetActiveStageWaves();
 	if (ActiveStageWaves.IsValidIndex(CurrentStageWaveIndex) == false)
 	{
-		ClearStage();
+		if (IsValid(WaveSpawner) == false || WaveSpawner->HasAliveEnemies() == false)
+		{
+			ClearStage();
+		}
 		return;
 	}
 
@@ -249,6 +273,7 @@ void ASXStageFlowManager::BeginCurrentWave()
 	const FSXStageWaveData& WaveData = ActiveStageWaves[CurrentStageWaveIndex];
 	const int32 ExpectedSpawnCount = GetWaveSpawnCount(WaveData);
 	const int32 StageWaveNumber = CurrentStageWaveIndex + 1;
+	CurrentWaveSpawnCount = ExpectedSpawnCount;
 
 	UE_LOG(LogTemp, Log, TEXT("SXStageFlowManager %s starting Wave %d/%d from %s. ExpectedSpawnCount=%d"),
 		*GetName(),
@@ -261,10 +286,39 @@ void ASXStageFlowManager::BeginCurrentWave()
 
 	if (WaveData.TimeLimit > 0.0f)
 	{
-		GetWorldTimerManager().SetTimer(WaveTimeLimitTimerHandle, this, &ThisClass::FailStage, WaveData.TimeLimit, false);
+		GetWorldTimerManager().ClearTimer(WaveAdvanceTimerHandle);
+		GetWorldTimerManager().SetTimer(WaveAdvanceTimerHandle, this, &ThisClass::HandleWaveAdvanceTimeElapsed, WaveData.TimeLimit, false);
 	}
 
+	WaveSpawner->SetDropDatabaseContext(DropDatabase.Get(), StageId, StageWaveNumber);
 	WaveSpawner->StartWaveFromData(WaveData);
+}
+
+void ASXStageFlowManager::BroadcastStageState()
+{
+	if (bStageCleared)
+	{
+		OnStageCleared.Broadcast();
+		return;
+	}
+
+	if (bStageFailed)
+	{
+		OnStageFailed.Broadcast();
+		return;
+	}
+
+	if (bStageStarted == false)
+	{
+		return;
+	}
+
+	OnStageStarted.Broadcast();
+
+	if (CurrentStageWaveIndex != INDEX_NONE && GetActiveStageWaves().IsValidIndex(CurrentStageWaveIndex))
+	{
+		OnStageWaveStarted.Broadcast(GetCurrentStageWaveNumber(), GetTotalWaveCount(), CurrentWaveSpawnCount);
+	}
 }
 
 const TArray<FSXStageWaveData>& ASXStageFlowManager::GetActiveStageWaves() const

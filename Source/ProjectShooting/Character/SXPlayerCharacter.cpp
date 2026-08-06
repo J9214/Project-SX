@@ -18,8 +18,10 @@
 #include "Kismet/KismetMathLibrary.h"
 #include "Components/SXPickupComponent.h"
 #include "Components/SXStatusComponent.h"
+#include "Components/SXInventoryComponent.h"
 #include "Input/SXInputConfig.h"
 #include "Interaction/SXInteractableInterface.h"
+#include "Kismet/GameplayStatics.h"
 #include "Skill/SXSkillComponent.h"
 
 ASXPlayerCharacter::ASXPlayerCharacter()
@@ -28,15 +30,16 @@ ASXPlayerCharacter::ASXPlayerCharacter()
 
 	GetCapsuleComponent()->InitCapsuleSize(34.0f, 96.0f);
 
-	SkeletalMeshComponent = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("SkeletalMeshComponent"));
-	SkeletalMeshComponent->SetupAttachment(GetMesh());
-	SkeletalMeshComponent->SetOnlyOwnerSee(true);
-	SkeletalMeshComponent->SetCollisionProfileName(TEXT("NoCollision"));
-
 	CameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("CameraComponent"));
 	CameraComponent->SetupAttachment(GetCapsuleComponent());
 	CameraComponent->SetRelativeLocation(FirstPersonCameraLocation);
 	CameraComponent->bUsePawnControlRotation = true;
+
+	SkeletalMeshComponent = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("SkeletalMeshComponent"));
+	SkeletalMeshComponent->SetupAttachment(CameraComponent);
+	SkeletalMeshComponent->SetOnlyOwnerSee(true);
+	SkeletalMeshComponent->SetCollisionProfileName(TEXT("NoCollision"));
+	SkeletalMeshComponent->SetCastShadow(false);
 
 	SpringArmComponent = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArmComponent"));
 	SpringArmComponent->SetupAttachment(GetCapsuleComponent());
@@ -51,6 +54,7 @@ ASXPlayerCharacter::ASXPlayerCharacter()
 	SpringArmComponent->SetActive(false);
 
 	SkillComponent = CreateDefaultSubobject<USXSkillComponent>(TEXT("SkillComponent"));
+	InventoryComponent = CreateDefaultSubobject<USXInventoryComponent>(TEXT("InventoryComponent"));
 
 	GetMesh()->SetOwnerNoSee(true);
 
@@ -65,7 +69,21 @@ ASXPlayerCharacter::ASXPlayerCharacter()
 	MovementComponent->bOrientRotationToMovement = true;
 	MovementComponent->RotationRate = FRotator(0.0f, 720.0f, 0.0f);
 
+	bUseDeathDissolve = true;
+	bDestroyAfterDeathDissolve = false;
+
 	TimeBetweenFire = GetStatusComponent()->GetTimeBetweenFire();
+}
+
+void ASXPlayerCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+
+	SetViewMode(DefaultViewMode);
+	EquipDefaultWeapon();
+	ReloadGameplayOptions();
+
+	GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::ReattachCurrentWeaponToViewMesh);
 }
 
 void ASXPlayerCharacter::Tick(float DeltaSeconds)
@@ -80,7 +98,14 @@ void ASXPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
-	SetViewMode(DefaultViewMode);
+	if (CurrentViewMode == EViewMode::None)
+	{
+		SetViewMode(DefaultViewMode);
+	}
+	else
+	{
+		ReattachCurrentWeaponToViewMesh();
+	}
 
 	UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent);
 	if (!IsValid(EnhancedInputComponent))
@@ -107,8 +132,14 @@ void ASXPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	if (PlayerCharacterInputConfig->InteractAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->InteractAction, ETriggerEvent::Started, this, &ThisClass::Interact);
 	if (PlayerCharacterInputConfig->ChangeViewAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->ChangeViewAction, ETriggerEvent::Started, this, &ThisClass::ChangeView);
 	if (PlayerCharacterInputConfig->ToggleSelectorAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->ToggleSelectorAction, ETriggerEvent::Started, this, &ThisClass::InputToggleSelector);
-	if (PlayerCharacterInputConfig->IronSightAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->IronSightAction, ETriggerEvent::Started, this, &ThisClass::IronSight);
-	if (PlayerCharacterInputConfig->IronSightAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->IronSightAction, ETriggerEvent::Completed, this, &ThisClass::IronSight);
+	if (PlayerCharacterInputConfig->IronSightAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->IronSightAction, ETriggerEvent::Started, this, &ThisClass::StartIronSightInput);
+	if (PlayerCharacterInputConfig->IronSightAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->IronSightAction, ETriggerEvent::Completed, this, &ThisClass::StopIronSightInput);
+	if (PlayerCharacterInputConfig->WeaponSlot1Action) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->WeaponSlot1Action, ETriggerEvent::Started, this, &ThisClass::InputWeaponSlot1);
+	if (PlayerCharacterInputConfig->WeaponSlot2Action) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->WeaponSlot2Action, ETriggerEvent::Started, this, &ThisClass::InputWeaponSlot2);
+	if (PlayerCharacterInputConfig->WeaponSlot3Action) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->WeaponSlot3Action, ETriggerEvent::Started, this, &ThisClass::InputWeaponSlot3);
+	if (PlayerCharacterInputConfig->NextWeaponAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->NextWeaponAction, ETriggerEvent::Started, this, &ThisClass::InputNextWeapon);
+	if (PlayerCharacterInputConfig->PreviousWeaponAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->PreviousWeaponAction, ETriggerEvent::Started, this, &ThisClass::InputPreviousWeapon);
+	if (PlayerCharacterInputConfig->DropWeaponAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->DropWeaponAction, ETriggerEvent::Started, this, &ThisClass::InputDropWeapon);
 	if (PlayerCharacterInputConfig->MovementSkillAction) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->MovementSkillAction, ETriggerEvent::Started, this, &ThisClass::InputMovementSkill);
 	if (PlayerCharacterInputConfig->Skill1Action) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->Skill1Action, ETriggerEvent::Started, this, &ThisClass::InputSkill1);
 	if (PlayerCharacterInputConfig->Skill2Action) EnhancedInputComponent->BindAction(PlayerCharacterInputConfig->Skill2Action, ETriggerEvent::Started, this, &ThisClass::InputSkill2);
@@ -140,8 +171,34 @@ void ASXPlayerCharacter::Look(const FInputActionValue& Value)
 	}
 
 	const FVector2D LookAxisVector = Value.Get<FVector2D>();
-	AddControllerYawInput(LookAxisVector.X);
-	AddControllerPitchInput(LookAxisVector.Y);
+	const float Sensitivity = FMath::Max(0.01f, GameplayOptions.MouseSensitivity);
+	const float InvertYMultiplier = GameplayOptions.bInvertLookY ? -1.0f : 1.0f;
+
+	AddControllerYawInput(LookAxisVector.X * Sensitivity);
+	AddControllerPitchInput(LookAxisVector.Y * Sensitivity * InvertYMultiplier);
+}
+
+void ASXPlayerCharacter::ApplyGameplayOptions(const FSXOptionsSnapshot& Options)
+{
+	GameplayOptions = Options;
+	GameplayOptions.MouseSensitivity = FMath::Max(0.01f, GameplayOptions.MouseSensitivity);
+}
+
+void ASXPlayerCharacter::ReloadGameplayOptions()
+{
+	FSXOptionsSnapshot LoadedOptions;
+	if (UGameplayStatics::DoesSaveGameExist(TEXT("SXOptions"), 0))
+	{
+		if (USaveGame* SaveGame = UGameplayStatics::LoadGameFromSlot(TEXT("SXOptions"), 0))
+		{
+			if (const USXOptionsSaveGame* OptionsSaveGame = Cast<USXOptionsSaveGame>(SaveGame))
+			{
+				LoadedOptions = OptionsSaveGame->Options;
+			}
+		}
+	}
+
+	ApplyGameplayOptions(LoadedOptions);
 }
 
 void ASXPlayerCharacter::StartJump()
@@ -182,11 +239,16 @@ void ASXPlayerCharacter::StartFire()
 		return;
 	}
 
-	if (bIsFullAutoFire)
+	if (CurrentWeapon->IsReloading())
 	{
-		TryFire(); // 첫 발 즉시 발사
+		return;
+	}
 
-		TimeBetweenFire = GetStatusComponent()->GetTimeBetweenFire();
+	if (CurrentWeapon->IsFullAutoEnabled())
+	{
+		TryFire();
+
+		TimeBetweenFire = FMath::Max(0.01f, CurrentWeapon->GetFireInterval());
 
 		GetWorldTimerManager().SetTimer(
 			FullAutoTimerHandle,
@@ -208,6 +270,28 @@ void ASXPlayerCharacter::StopFire()
 	GetWorldTimerManager().ClearTimer(FullAutoTimerHandle);
 }
 
+void ASXPlayerCharacter::Die(AActor* DamageCauser)
+{
+	if (bIsDead)
+	{
+		return;
+	}
+
+	StopFire();
+
+	if (IsValid(CurrentWeapon.Get()))
+	{
+		CurrentWeapon->CancelReload();
+	}
+
+	if (IsValid(DeathMontage.Get()))
+	{
+		PlayAnimMontage(DeathMontage);
+	}
+
+	Super::Die(DamageCauser);
+}
+
 void ASXPlayerCharacter::Reload()
 {
 	if (!IsAlive())
@@ -221,7 +305,7 @@ void ASXPlayerCharacter::Reload()
 	}
 
 	GetWorldTimerManager().ClearTimer(FullAutoTimerHandle);
-	CurrentWeapon->Reload();
+	CurrentWeapon->StartReload(this);
 }
 
 void ASXPlayerCharacter::SetInteractionCandidate(UObject* NewInteractionCandidate)
@@ -264,6 +348,48 @@ void ASXPlayerCharacter::ClearPickupCandidate(USXPickupComponent* PickupCandidat
 USXPickupComponent* ASXPlayerCharacter::GetCurrentPickupCandidate() const
 {
 	return Cast<USXPickupComponent>(CurrentInteractionCandidate);
+}
+
+USkeletalMeshComponent* ASXPlayerCharacter::GetWeaponAttachMesh() const
+{
+	if (CurrentViewMode == EViewMode::FirstPersonView && IsValid(SkeletalMeshComponent.Get()))
+	{
+		const bool bHasFirstPersonWeaponSocket = SkeletalMeshComponent->DoesSocketExist(TEXT("WeaponSocket"))
+			|| SkeletalMeshComponent->DoesSocketExist(TEXT("Weapon_Socket"));
+		if (bHasFirstPersonWeaponSocket)
+		{
+			return SkeletalMeshComponent;
+		}
+	}
+
+	return GetMesh();
+}
+
+USkeletalMeshComponent* ASXPlayerCharacter::FindWeaponAttachMesh(FName PreferredSocketName, FName LegacySocketName) const
+{
+	USkeletalMeshComponent* PreferredMesh = GetWeaponAttachMesh();
+	if (IsValid(PreferredMesh)
+		&& (PreferredMesh->DoesSocketExist(PreferredSocketName) || PreferredMesh->DoesSocketExist(LegacySocketName)))
+	{
+		return PreferredMesh;
+	}
+
+	if (IsValid(SkeletalMeshComponent.Get())
+		&& SkeletalMeshComponent.Get() != PreferredMesh
+		&& (SkeletalMeshComponent->DoesSocketExist(PreferredSocketName) || SkeletalMeshComponent->DoesSocketExist(LegacySocketName)))
+	{
+		return SkeletalMeshComponent.Get();
+	}
+
+	USkeletalMeshComponent* ThirdPersonMesh = GetMesh();
+	if (IsValid(ThirdPersonMesh)
+		&& ThirdPersonMesh != PreferredMesh
+		&& (ThirdPersonMesh->DoesSocketExist(PreferredSocketName) || ThirdPersonMesh->DoesSocketExist(LegacySocketName)))
+	{
+		return ThirdPersonMesh;
+	}
+
+	return PreferredMesh;
 }
 
 void ASXPlayerCharacter::Interact()
@@ -310,6 +436,57 @@ void ASXPlayerCharacter::InputSkill2()
 	}
 
 	SkillComponent->ActivateSkill(ESXSkillSlot::Skill2);
+}
+
+void ASXPlayerCharacter::InputWeaponSlot1()
+{
+	EquipWeaponSlot(0);
+}
+
+void ASXPlayerCharacter::InputWeaponSlot2()
+{
+	EquipWeaponSlot(1);
+}
+
+void ASXPlayerCharacter::InputWeaponSlot3()
+{
+	EquipWeaponSlot(2);
+}
+
+void ASXPlayerCharacter::InputNextWeapon()
+{
+	EquipNextWeapon();
+}
+
+void ASXPlayerCharacter::InputPreviousWeapon()
+{
+	EquipPreviousWeapon();
+}
+
+void ASXPlayerCharacter::InputDropWeapon()
+{
+	DropCurrentWeapon();
+}
+
+void ASXPlayerCharacter::StartIronSightInput()
+{
+	if (GameplayOptions.bToggleAim)
+	{
+		IronSight();
+		return;
+	}
+
+	SetIronSightZoomed(true);
+}
+
+void ASXPlayerCharacter::StopIronSightInput()
+{
+	if (GameplayOptions.bToggleAim)
+	{
+		return;
+	}
+
+	SetIronSightZoomed(false);
 }
 
 void ASXPlayerCharacter::TryFire()
@@ -365,17 +542,19 @@ void ASXPlayerCharacter::SetViewMode(EViewMode InViewMode)
 		bUseControllerRotationRoll = false;
 
 		SkeletalMeshComponent->SetOwnerNoSee(true);
+		SkeletalMeshComponent->SetHiddenInGame(true);
 		GetMesh()->SetOwnerNoSee(false);
+		GetMesh()->SetHiddenInGame(false);
 
 		CameraComponent->AttachToComponent(SpringArmComponent, FAttachmentTransformRules::SnapToTargetNotIncludingScale, USpringArmComponent::SocketName);
-		CameraComponent->SetRelativeLocation(FVector::ZeroVector);
-		CameraComponent->SetRelativeRotation(FRotator::ZeroRotator);
+		CameraComponent->SetRelativeLocation(ThirdPersonCameraLocalLocation);
+		CameraComponent->SetRelativeRotation(ThirdPersonCameraLocalRotation);
 		CameraComponent->bUsePawnControlRotation = false;
 
 		SpringArmComponent->SetActive(true);
 		SpringArmComponent->SetRelativeLocation(ThirdPersonPivotLocation);
 		SpringArmComponent->TargetArmLength = 400.0f;
-		SpringArmComponent->SocketOffset = FVector::ZeroVector;
+		SpringArmComponent->SocketOffset = ThirdPersonCameraOffset;
 		SpringArmComponent->SetRelativeRotation(FRotator::ZeroRotator);
 		SpringArmComponent->bUsePawnControlRotation = true;
 		SpringArmComponent->bInheritPitch = true;
@@ -392,7 +571,9 @@ void ASXPlayerCharacter::SetViewMode(EViewMode InViewMode)
 		bUseControllerRotationRoll = false;
 
 		SkeletalMeshComponent->SetOwnerNoSee(false);
+		SkeletalMeshComponent->SetHiddenInGame(false);
 		GetMesh()->SetOwnerNoSee(true);
+		GetMesh()->SetHiddenInGame(true);
 
 		CameraComponent->AttachToComponent(GetCapsuleComponent(), FAttachmentTransformRules::KeepRelativeTransform);
 		CameraComponent->SetRelativeLocation(FirstPersonCameraLocation);
@@ -406,15 +587,17 @@ void ASXPlayerCharacter::SetViewMode(EViewMode InViewMode)
 		break;
 	case EViewMode::ThirdPersonView:
 		bUseControllerRotationPitch = false;
-		bUseControllerRotationYaw = false;
+		bUseControllerRotationYaw = true;
 		bUseControllerRotationRoll = false;
 
 		SkeletalMeshComponent->SetOwnerNoSee(true);
+		SkeletalMeshComponent->SetHiddenInGame(true);
 		GetMesh()->SetOwnerNoSee(false);
+		GetMesh()->SetHiddenInGame(false);
 
 		CameraComponent->AttachToComponent(SpringArmComponent, FAttachmentTransformRules::SnapToTargetNotIncludingScale, USpringArmComponent::SocketName);
-		CameraComponent->SetRelativeLocation(FVector::ZeroVector);
-		CameraComponent->SetRelativeRotation(FRotator::ZeroRotator);
+		CameraComponent->SetRelativeLocation(ThirdPersonCameraLocalLocation);
+		CameraComponent->SetRelativeRotation(ThirdPersonCameraLocalRotation);
 		CameraComponent->bUsePawnControlRotation = false;
 
 		SpringArmComponent->SetActive(true);
@@ -428,7 +611,7 @@ void ASXPlayerCharacter::SetViewMode(EViewMode InViewMode)
 		SpringArmComponent->bInheritRoll = false;
 		SpringArmComponent->bDoCollisionTest = true;
 
-		GetCharacterMovement()->bOrientRotationToMovement = true;
+		GetCharacterMovement()->bOrientRotationToMovement = false;
 
 		break;
 	case EViewMode::None:
@@ -436,6 +619,369 @@ void ASXPlayerCharacter::SetViewMode(EViewMode InViewMode)
 	default:
 		break;
 	}
+
+	ReattachCurrentWeaponToViewMesh();
+}
+
+void ASXPlayerCharacter::ReattachCurrentWeaponToViewMesh()
+{
+	ASXWeapon* Weapon = CurrentWeapon.Get();
+	if (IsValid(Weapon) == false)
+	{
+		return;
+	}
+
+	USkeletalMeshComponent* TargetMesh = FindWeaponAttachMesh(Weapon->GetCharacterAttachSocketName(), Weapon->GetLegacyCharacterAttachSocketName());
+	if (IsValid(TargetMesh) == false)
+	{
+		return;
+	}
+
+	FName SocketNameToUse = Weapon->GetCharacterAttachSocketName();
+	if (TargetMesh->DoesSocketExist(SocketNameToUse) == false && TargetMesh->DoesSocketExist(Weapon->GetLegacyCharacterAttachSocketName()))
+	{
+		SocketNameToUse = Weapon->GetLegacyCharacterAttachSocketName();
+	}
+
+	const bool bSocketExists = TargetMesh->DoesSocketExist(SocketNameToUse);
+	if (bSocketExists == false)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s cannot attach weapon %s to socket. Mesh=%s Socket=%s LegacySocket=%s"),
+			*GetNameSafe(this),
+			*GetNameSafe(Weapon),
+			*GetNameSafe(TargetMesh),
+			*Weapon->GetCharacterAttachSocketName().ToString(),
+			*Weapon->GetLegacyCharacterAttachSocketName().ToString());
+	}
+
+	Weapon->AttachToComponent(TargetMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, bSocketExists ? SocketNameToUse : NAME_None);
+
+	// BeginPlay equips the default weapon before some HUD widgets finish
+	// constructing. Re-broadcast on the scheduled reattach tick so the initial
+	// revolver ammo display binds to the same data as subsequently equipped guns.
+	Weapon->BroadcastAmmoChanged();
+}
+
+void ASXPlayerCharacter::EquipDefaultWeapon()
+{
+	if (bEquipDefaultWeaponOnBeginPlay == false || DefaultWeaponClass == nullptr || IsValid(CurrentWeapon.Get()))
+	{
+		return;
+	}
+
+	if (IsValid(InventoryComponent.Get()))
+	{
+		if (DefaultWeaponSlotIndex >= 0 && DefaultWeaponSlotIndex < InventoryComponent->GetMaxWeaponSlots())
+		{
+			InventoryComponent->SetWeaponSlot(DefaultWeaponSlotIndex, DefaultWeaponClass);
+		}
+		else
+		{
+			int32 AddedSlotIndex = INDEX_NONE;
+			InventoryComponent->AddWeaponClass(DefaultWeaponClass, AddedSlotIndex);
+			DefaultWeaponSlotIndex = AddedSlotIndex;
+		}
+	}
+
+	EquipWeaponClassInternal(DefaultWeaponClass, DefaultWeaponSlotIndex, true);
+}
+
+bool ASXPlayerCharacter::EquipWeaponSlot(int32 SlotIndex)
+{
+	if (!IsAlive() || IsValid(InventoryComponent.Get()) == false)
+	{
+		return false;
+	}
+
+	TSubclassOf<ASXWeapon> WeaponClass = InventoryComponent->GetWeaponInSlot(SlotIndex);
+	if (WeaponClass == nullptr)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s cannot equip weapon slot %d: slot is empty."),
+			*GetNameSafe(this),
+			SlotIndex);
+		return false;
+	}
+
+	return EquipWeaponClassInternal(WeaponClass, SlotIndex, false);
+}
+
+bool ASXPlayerCharacter::EquipWeaponClass(TSubclassOf<ASXWeapon> WeaponClass, bool bGrantInitialAmmo)
+{
+	if (!IsAlive())
+	{
+		return false;
+	}
+
+	int32 SlotIndex = INDEX_NONE;
+	if (IsValid(InventoryComponent.Get()))
+	{
+		SlotIndex = InventoryComponent->GetWeaponSlots().Find(WeaponClass);
+	}
+
+	return EquipWeaponClassInternal(WeaponClass, SlotIndex, bGrantInitialAmmo);
+}
+
+bool ASXPlayerCharacter::AddPickedWeaponClassToInventory(TSubclassOf<ASXWeapon> WeaponClass, int32& OutSlotIndex)
+{
+	TSubclassOf<ASXWeapon> ReplacedWeaponClass = nullptr;
+	return AddPickedWeaponClassToInventory(WeaponClass, OutSlotIndex, ReplacedWeaponClass);
+}
+
+bool ASXPlayerCharacter::AddPickedWeaponClassToInventory(TSubclassOf<ASXWeapon> WeaponClass, int32& OutSlotIndex, TSubclassOf<ASXWeapon>& OutReplacedWeaponClass)
+{
+	OutSlotIndex = INDEX_NONE;
+	OutReplacedWeaponClass = nullptr;
+	if (WeaponClass == nullptr || IsValid(InventoryComponent.Get()) == false)
+	{
+		return false;
+	}
+
+	const int32 ExistingSlotIndex = InventoryComponent->GetWeaponSlots().Find(WeaponClass);
+	if (ExistingSlotIndex != INDEX_NONE)
+	{
+		OutSlotIndex = ExistingSlotIndex;
+		return true;
+	}
+
+	const int32 SlotIndex = ChoosePickedWeaponSlot(WeaponClass);
+	if (SlotIndex == INDEX_NONE)
+	{
+		return false;
+	}
+
+	OutReplacedWeaponClass = InventoryComponent->GetWeaponInSlot(SlotIndex);
+	if (OutReplacedWeaponClass == WeaponClass)
+	{
+		OutReplacedWeaponClass = nullptr;
+	}
+
+	const bool bSlotSet = InventoryComponent->SetWeaponSlot(SlotIndex, WeaponClass);
+	if (bSlotSet)
+	{
+		OutSlotIndex = SlotIndex;
+	}
+
+	return bSlotSet;
+}
+
+bool ASXPlayerCharacter::EquipNextWeapon()
+{
+	return EquipWeaponByOffset(1);
+}
+
+bool ASXPlayerCharacter::EquipPreviousWeapon()
+{
+	return EquipWeaponByOffset(-1);
+}
+
+bool ASXPlayerCharacter::DropCurrentWeapon()
+{
+	if (!IsAlive() || IsValid(CurrentWeapon.Get()) == false || IsValid(InventoryComponent.Get()) == false)
+	{
+		return false;
+	}
+
+	const int32 SlotIndexToDrop = CurrentWeaponSlotIndex;
+	if (SlotIndexToDrop == INDEX_NONE || InventoryComponent->GetWeaponInSlot(SlotIndexToDrop) == nullptr)
+	{
+		return false;
+	}
+
+	if (bCanDropDefaultWeaponSlot == false && SlotIndexToDrop == DefaultWeaponSlotIndex)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s cannot drop default weapon slot %d."),
+			*GetNameSafe(this),
+			SlotIndexToDrop);
+		return false;
+	}
+
+	TSubclassOf<ASXWeapon> WeaponClassToDrop = InventoryComponent->GetWeaponInSlot(SlotIndexToDrop);
+	if (WeaponClassToDrop == nullptr)
+	{
+		return false;
+	}
+
+	const FVector DropSourceLocation = CurrentWeapon->GetActorLocation();
+
+	StopFire();
+	CurrentWeapon->CancelReload();
+	CurrentWeapon->Destroy();
+	CurrentWeapon = nullptr;
+
+	InventoryComponent->RemoveWeaponAt(SlotIndexToDrop);
+	CurrentWeaponSlotIndex = INDEX_NONE;
+
+	DropWeaponClass(WeaponClassToDrop, DropSourceLocation);
+
+	if (bCanDropDefaultWeaponSlot == false
+		&& DefaultWeaponSlotIndex != SlotIndexToDrop
+		&& InventoryComponent->GetWeaponInSlot(DefaultWeaponSlotIndex) != nullptr)
+	{
+		return EquipWeaponSlot(DefaultWeaponSlotIndex);
+	}
+
+	return EquipNextWeapon();
+}
+
+bool ASXPlayerCharacter::EquipWeaponByOffset(int32 SlotOffset)
+{
+	if (!IsAlive() || IsValid(InventoryComponent.Get()) == false || InventoryComponent->GetMaxWeaponSlots() <= 0)
+	{
+		return false;
+	}
+
+	const int32 MaxSlots = InventoryComponent->GetMaxWeaponSlots();
+	int32 StartSlotIndex = CurrentWeaponSlotIndex;
+	if (StartSlotIndex == INDEX_NONE)
+	{
+		StartSlotIndex = SlotOffset >= 0 ? -1 : 0;
+	}
+
+	const int32 Direction = SlotOffset >= 0 ? 1 : -1;
+	for (int32 Step = 1; Step <= MaxSlots; ++Step)
+	{
+		const int32 CandidateSlotIndex = (StartSlotIndex + Direction * Step + MaxSlots) % MaxSlots;
+		if (InventoryComponent->GetWeaponInSlot(CandidateSlotIndex) != nullptr)
+		{
+			return EquipWeaponSlot(CandidateSlotIndex);
+		}
+	}
+
+	return false;
+}
+
+int32 ASXPlayerCharacter::ChoosePickedWeaponSlot(TSubclassOf<ASXWeapon> WeaponClass) const
+{
+	if (WeaponClass == nullptr || IsValid(InventoryComponent.Get()) == false)
+	{
+		return INDEX_NONE;
+	}
+
+	constexpr int32 PrimarySlot0 = 0;
+	constexpr int32 PrimarySlot1 = 1;
+
+	if (InventoryComponent->GetMaxWeaponSlots() <= PrimarySlot0)
+	{
+		return INDEX_NONE;
+	}
+
+	if (InventoryComponent->GetWeaponInSlot(PrimarySlot0) == nullptr)
+	{
+		return PrimarySlot0;
+	}
+
+	if (InventoryComponent->GetMaxWeaponSlots() > PrimarySlot1 && InventoryComponent->GetWeaponInSlot(PrimarySlot1) == nullptr)
+	{
+		return PrimarySlot1;
+	}
+
+	if (CurrentWeaponSlotIndex == PrimarySlot0 || CurrentWeaponSlotIndex == PrimarySlot1)
+	{
+		return CurrentWeaponSlotIndex;
+	}
+
+	return PrimarySlot0;
+}
+
+bool ASXPlayerCharacter::EquipWeaponClassInternal(TSubclassOf<ASXWeapon> WeaponClass, int32 SlotIndex, bool bGrantInitialAmmo)
+{
+	if (WeaponClass == nullptr)
+	{
+		return false;
+	}
+
+	if (IsValid(CurrentWeapon.Get()) && CurrentWeapon->GetClass() == WeaponClass)
+	{
+		CurrentWeaponSlotIndex = SlotIndex;
+		CurrentWeapon->BroadcastAmmoChanged();
+		ReattachCurrentWeaponToViewMesh();
+		return true;
+	}
+
+	StopFire();
+
+	if (IsValid(CurrentWeapon.Get()))
+	{
+		CurrentWeapon->CancelReload();
+		CurrentWeapon->Destroy();
+		CurrentWeapon = nullptr;
+	}
+
+	UWorld* World = GetWorld();
+	if (IsValid(World) == false)
+	{
+		return false;
+	}
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Owner = this;
+	SpawnParams.Instigator = this;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	ASXWeapon* NewWeapon = World->SpawnActor<ASXWeapon>(
+		WeaponClass,
+		GetActorTransform(),
+		SpawnParams
+	);
+
+	if (IsValid(NewWeapon) == false)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s failed to spawn weapon %s."),
+			*GetNameSafe(this),
+			*GetNameSafe(WeaponClass.Get()));
+		return false;
+	}
+
+	if (NewWeapon->EquipToCharacter(this, bGrantInitialAmmo) == false)
+	{
+		NewWeapon->Destroy();
+		return false;
+	}
+
+	CurrentWeaponSlotIndex = SlotIndex;
+	bIsFullAutoFire = NewWeapon->IsFullAutoEnabled();
+	ReattachCurrentWeaponToViewMesh();
+	return true;
+}
+
+void ASXPlayerCharacter::DropWeaponClass(TSubclassOf<ASXWeapon> WeaponClass, const FVector& DropSourceLocation)
+{
+	if (WeaponClass == nullptr)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (IsValid(World) == false)
+	{
+		return;
+	}
+
+	const FVector ForwardDirection = GetActorForwardVector().GetSafeNormal();
+	const FVector DropLocation = DropSourceLocation + ForwardDirection * 120.0f + FVector::UpVector * 60.0f;
+	const FRotator DropRotation = FRotator(0.0f, GetActorRotation().Yaw, 0.0f);
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Owner = nullptr;
+	SpawnParams.Instigator = this;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+	ASXWeapon* DroppedWeapon = World->SpawnActor<ASXWeapon>(
+		WeaponClass,
+		DropLocation,
+		DropRotation,
+		SpawnParams
+	);
+
+	if (IsValid(DroppedWeapon) == false)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s failed to drop replaced weapon %s."),
+			*GetNameSafe(this),
+			*GetNameSafe(WeaponClass.Get()));
+		return;
+	}
+
+	DroppedWeapon->SetGrantInitialReserveAmmoOnPickup(false);
 }
 
 void ASXPlayerCharacter::AttackMelee()
@@ -455,7 +1001,18 @@ void ASXPlayerCharacter::AttackMelee()
 
 void ASXPlayerCharacter::InputToggleSelector(const FInputActionValue& InValue)
 {
-	bIsFullAutoFire = !bIsFullAutoFire;
+	if (IsValid(CurrentWeapon.Get()) == false)
+	{
+		return;
+	}
+
+	const bool bToggled = CurrentWeapon->ToggleFullAuto();
+	bIsFullAutoFire = CurrentWeapon->IsFullAutoEnabled();
+
+	if (bToggled == false)
+	{
+		UE_LOG(LogTemp, Log, TEXT("Weapon %s does not support full-auto fire."), *GetNameSafe(CurrentWeapon.Get()));
+	}
 }
 
 void ASXPlayerCharacter::IronSight()
@@ -469,13 +1026,25 @@ void ASXPlayerCharacter::IronSight()
 	{
 		return;
 	}
-	
-	Zoomed = !Zoomed;
 
-	if (Zoomed) {
+	SetIronSightZoomed(!Zoomed);
+}
+
+void ASXPlayerCharacter::SetIronSightZoomed(bool bNewZoomed)
+{
+	if (!IsAlive() || IsValid(CurrentWeapon.Get()) == false)
+	{
+		return;
+	}
+
+	Zoomed = bNewZoomed;
+
+	if (Zoomed)
+	{
 		TargetFOV = 45.f;
 	}
-	else {
+	else
+	{
 		TargetFOV = 70.f;
 	}
 }

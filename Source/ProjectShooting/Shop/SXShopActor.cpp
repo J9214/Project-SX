@@ -4,6 +4,7 @@
 
 #include "Character/SXPlayerCharacter.h"
 #include "Components/BoxComponent.h"
+#include "Components/SXInventoryComponent.h"
 #include "Components/SXStatusComponent.h"
 #include "Item/SXWeapon.h"
 #include "Shop/SXShopDataAsset.h"
@@ -58,6 +59,13 @@ bool ASXShopActor::TryPurchaseItem(ASXPlayerCharacter* Buyer, USXShopItemData* S
 		return false;
 	}
 
+	if (ShopItemData->ItemType == ESXShopItemType::AmmoType)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Shop item %s uses deprecated AmmoType purchase. Ammo type is fixed per weapon now."),
+			*GetNameSafe(ShopItemData));
+		return false;
+	}
+
 	USXStatusComponent* StatusComponent = Buyer->GetStatusComponent();
 	if (IsValid(StatusComponent) == false || StatusComponent->SpendGold(ShopItemData->Price) == false)
 	{
@@ -70,12 +78,17 @@ bool ASXShopActor::TryPurchaseItem(ASXPlayerCharacter* Buyer, USXShopItemData* S
 		StatusComponent->Heal(ShopItemData->HealAmount, this);
 		break;
 	case ESXShopItemType::AmmoType:
-		if (ASXWeapon* CurrentWeapon = Buyer->GetCurrentWeapon())
-		{
-			CurrentWeapon->SetCurrentAmmoType(ShopItemData->AmmoType);
-		}
 		break;
 	case ESXShopItemType::Ammo:
+		if (USXInventoryComponent* InventoryComponent = Buyer->GetInventoryComponent())
+		{
+			InventoryComponent->AddAmmo(ShopItemData->AmmoType, ShopItemData->AmmoAmount);
+		}
+		if (ASXWeapon* CurrentWeapon = Buyer->GetCurrentWeapon())
+		{
+			CurrentWeapon->BroadcastAmmoChanged();
+		}
+		break;
 	case ESXShopItemType::Weapon:
 	case ESXShopItemType::Custom:
 	default:

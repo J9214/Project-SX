@@ -3,7 +3,9 @@
 #include "Item/SXAmmoProjectile.h"
 
 #include "Character/SXCharacterBase.h"
+#include "Character/SXPlayerCharacter.h"
 #include "Components/SphereComponent.h"
+#include "Controller/SXPlayerController.h"
 #include "Engine/DamageEvents.h"
 #include "Engine/OverlapResult.h"
 #include "GameFramework/ProjectileMovementComponent.h"
@@ -76,7 +78,17 @@ void ASXAmmoProjectile::HandleBeginOverlap(UPrimitiveComponent* OverlappedCompon
 	if (IsValid(HittedCharacter) == true && HittedCharacter->IsAlive() == true)
 	{
 		FDamageEvent DamageEvent;
-		HittedCharacter->TakeDamage(Damage, DamageEvent, GetInstigatorController(), DamageCauser ? DamageCauser : this);
+		const float AppliedDamage = HittedCharacter->TakeDamage(Damage, DamageEvent, GetInstigatorController(), DamageCauser ? DamageCauser : this);
+		if (AppliedDamage > 0.0f)
+		{
+			if (ASXPlayerCharacter* SourcePlayer = Cast<ASXPlayerCharacter>(SourceActor))
+			{
+				if (ASXPlayerController* PlayerController = SourcePlayer->GetController<ASXPlayerController>())
+				{
+					PlayerController->ShowHitMarker(HittedCharacter->IsAlive() == false);
+				}
+			}
+		}
 
 		if (AmmoType == ESXAmmoType::Piercing)
 		{
@@ -121,6 +133,8 @@ void ASXAmmoProjectile::ApplyExplosionDamage(const FVector& ExplosionLocation)
 	}
 
 	TSet<AActor*> DamagedActors;
+	bool bAnyDamageApplied = false;
+	bool bAnyKilled = false;
 	for (const FOverlapResult& OverlapResult : OverlapResults)
 	{
 		ASXCharacterBase* HittedCharacter = Cast<ASXCharacterBase>(OverlapResult.GetActor());
@@ -130,7 +144,23 @@ void ASXAmmoProjectile::ApplyExplosionDamage(const FVector& ExplosionLocation)
 		}
 
 		FDamageEvent DamageEvent;
-		HittedCharacter->TakeDamage(Damage, DamageEvent, GetInstigatorController(), DamageCauser ? DamageCauser : this);
+		const float AppliedDamage = HittedCharacter->TakeDamage(Damage, DamageEvent, GetInstigatorController(), DamageCauser ? DamageCauser : this);
+		if (AppliedDamage > 0.0f)
+		{
+			bAnyDamageApplied = true;
+			bAnyKilled |= HittedCharacter->IsAlive() == false;
+		}
 		DamagedActors.Add(HittedCharacter);
+	}
+
+	if (bAnyDamageApplied)
+	{
+		if (ASXPlayerCharacter* SourcePlayer = Cast<ASXPlayerCharacter>(SourceActor))
+		{
+			if (ASXPlayerController* PlayerController = SourcePlayer->GetController<ASXPlayerController>())
+			{
+				PlayerController->ShowHitMarker(bAnyKilled);
+			}
+		}
 	}
 }

@@ -49,6 +49,24 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SX|Input")
 	TObjectPtr<UInputAction> IronSightAction;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SX|Input|Weapon")
+	TObjectPtr<UInputAction> WeaponSlot1Action;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SX|Input|Weapon")
+	TObjectPtr<UInputAction> WeaponSlot2Action;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SX|Input|Weapon")
+	TObjectPtr<UInputAction> WeaponSlot3Action;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SX|Input|Weapon")
+	TObjectPtr<UInputAction> NextWeaponAction;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SX|Input|Weapon")
+	TObjectPtr<UInputAction> PreviousWeaponAction;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SX|Input|Weapon")
+	TObjectPtr<UInputAction> DropWeaponAction;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SX|Input|Skill")
 	TObjectPtr<UInputAction> MovementSkillAction;
 

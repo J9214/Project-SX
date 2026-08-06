@@ -97,7 +97,7 @@ protected:
 	bool bIsDead = false;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="SX|Status|Movement")
-	float WalkSpeed = 600.0f;
+	float WalkSpeed = 900.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="SX|Status|Movement")
 	float SprintSpeed = 900.0f;

@@ -4,10 +4,11 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "Item/SXWeapon.h"
 #include "SXCharacterBase.generated.h"
 
 class USXStatusComponent;
-class ASXWeapon;
+class UMaterialInstanceDynamic;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FSXOnCurrentWeaponChangedSignature, ASXWeapon*, CurrentWeapon);
 
@@ -52,16 +53,48 @@ protected:
 	UFUNCTION()
 	virtual void HandleDeath(USXStatusComponent* DeadStatusComponent, AActor* InstigatorActor);
 
+	void StartDeathDissolve();
+	void UpdateDeathDissolve();
+	void FinishDeathDissolve();
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="SX|Components")
 	TObjectPtr<USXStatusComponent> StatusComponent;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="SX|Character")
 	bool bIsDead = false;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="SX|Death|Dissolve")
+	bool bUseDeathDissolve = false;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="SX|Death|Dissolve")
+	bool bDestroyAfterDeathDissolve = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="SX|Death|Dissolve", meta=(ClampMin="0.01", Units=s))
+	float DeathDissolveDuration = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="SX|Death|Dissolve")
+	FName DissolveParameterName = TEXT("Dissolve");
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="SX|Death|Dissolve")
+	float DeathDissolveStartValue = -0.4f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="SX|Death|Dissolve")
+	float DeathDissolveEndValue = 0.7f;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> DeathDissolveMaterials;
+
+	FTimerHandle DeathDissolveTimerHandle;
+
+	float DeathDissolveElapsedTime = 0.0f;
+
 #pragma region Attack
 public:
 	UFUNCTION(BlueprintPure, Category="SX|Weapon")
 	ASXWeapon* GetCurrentWeapon() const { return CurrentWeapon; }
+
+	UFUNCTION(BlueprintPure, Category="SX|Weapon")
+	ESXWeaponType GetCurrentWeaponType() const;
 
 	UFUNCTION(BlueprintCallable, Category="SX|Weapon")
 	void SetCurrentWeapon(ASXWeapon* NewWeapon);
@@ -78,3 +111,4 @@ protected:
 	TObjectPtr<UAnimMontage> AttackMeleeMontage;
 #pragma endregion
 };
+ 

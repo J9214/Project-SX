@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Item/SXWeapon.h"
 #include "SXCollectiblePickup.generated.h"
 
 class ASXPlayerCharacter;
@@ -13,7 +14,8 @@ UENUM(BlueprintType)
 enum class ESXCollectibleType : uint8
 {
 	Gold,
-	Experience
+	Experience,
+	Ammo
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FSXOnCollectiblePickedUpSignature, ASXPlayerCharacter*, PickUpCharacter, ESXCollectibleType, CollectibleType, int32, Amount);
@@ -35,6 +37,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category="SX|Collectible")
 	void InitializeCollectible(ESXCollectibleType InCollectibleType, int32 InAmount);
 
+	UFUNCTION(BlueprintCallable, Category="SX|Collectible")
+	void InitializeAmmoCollectible(ESXAmmoType InAmmoType, int32 InAmount);
+
 	UPROPERTY(BlueprintAssignable, Category="SX|Collectible")
 	FSXOnCollectiblePickedUpSignature OnCollectiblePickedUp;
 
@@ -55,6 +60,9 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="SX|Collectible", meta=(ClampMin="1"))
 	int32 Amount = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="SX|Collectible|Ammo", meta=(EditCondition="CollectibleType == ESXCollectibleType::Ammo", EditConditionHides))
+	ESXAmmoType AmmoType = ESXAmmoType::Normal;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="SX|Collectible")
 	bool bDestroyOnPickup = true;

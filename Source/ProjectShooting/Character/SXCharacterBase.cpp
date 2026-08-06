@@ -3,11 +3,14 @@
 #include "Character/SXCharacterBase.h"
 
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/SXStatusComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Item/SXWeapon.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "TimerManager.h"
 
-int32 ASXCharacterBase::ShowAttackRangedDebug = 2;
+int32 ASXCharacterBase::ShowAttackRangedDebug = 0;
 
 FAutoConsoleVariableRef CVarShowAttackRangedDebug(
 	TEXT("SX.ShowAttackRangedDebug"),
@@ -80,7 +83,94 @@ void ASXCharacterBase::Die(AActor* DamageCauser)
 
 	BP_OnDied(DamageCauser);
 
-	SetLifeSpan(10.0f);
+	if (bUseDeathDissolve)
+	{
+		StartDeathDissolve();
+	}
+	else
+	{
+		SetLifeSpan(10.0f);
+	}
+}
+
+void ASXCharacterBase::StartDeathDissolve()
+{
+	USkeletalMeshComponent* MeshComponent = GetMesh();
+	if (IsValid(MeshComponent) == false)
+	{
+		if (bDestroyAfterDeathDissolve)
+		{
+			Destroy();
+		}
+		return;
+	}
+
+	DeathDissolveMaterials.Reset();
+
+	const int32 MaterialCount = MeshComponent->GetNumMaterials();
+	for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
+	{
+		UMaterialInstanceDynamic* DynamicMaterial = MeshComponent->CreateDynamicMaterialInstance(MaterialIndex);
+		if (IsValid(DynamicMaterial))
+		{
+			DynamicMaterial->SetScalarParameterValue(DissolveParameterName, DeathDissolveStartValue);
+			DeathDissolveMaterials.Add(DynamicMaterial);
+		}
+	}
+
+	if (DeathDissolveMaterials.IsEmpty())
+	{
+		if (bDestroyAfterDeathDissolve)
+		{
+			Destroy();
+		}
+		return;
+	}
+
+	DeathDissolveElapsedTime = 0.0f;
+	GetWorldTimerManager().ClearTimer(DeathDissolveTimerHandle);
+
+	constexpr float DissolveTickInterval = 0.02f;
+	GetWorldTimerManager().SetTimer(
+		DeathDissolveTimerHandle,
+		this,
+		&ThisClass::UpdateDeathDissolve,
+		DissolveTickInterval,
+		true
+	);
+}
+
+void ASXCharacterBase::UpdateDeathDissolve()
+{
+	constexpr float DissolveTickInterval = 0.02f;
+	DeathDissolveElapsedTime += DissolveTickInterval;
+
+	const float SafeDuration = FMath::Max(0.01f, DeathDissolveDuration);
+	const float Alpha = FMath::Clamp(DeathDissolveElapsedTime / SafeDuration, 0.0f, 1.0f);
+	const float DissolveValue = FMath::Lerp(DeathDissolveStartValue, DeathDissolveEndValue, Alpha);
+
+	for (UMaterialInstanceDynamic* DynamicMaterial : DeathDissolveMaterials)
+	{
+		if (IsValid(DynamicMaterial))
+		{
+			DynamicMaterial->SetScalarParameterValue(DissolveParameterName, DissolveValue);
+		}
+	}
+
+	if (Alpha >= 1.0f)
+	{
+		FinishDeathDissolve();
+	}
+}
+
+void ASXCharacterBase::FinishDeathDissolve()
+{
+	GetWorldTimerManager().ClearTimer(DeathDissolveTimerHandle);
+
+	if (bDestroyAfterDeathDissolve)
+	{
+		Destroy();
+	}
 }
 
 bool ASXCharacterBase::IsAlive() const
@@ -105,6 +195,11 @@ void ASXCharacterBase::SetCurrentWeapon(ASXWeapon* NewWeapon)
 		return;
 	}
 
+	if (IsValid(CurrentWeapon.Get()))
+	{
+		CurrentWeapon->CancelReload();
+	}
+
 	CurrentWeapon = NewWeapon;
 	OnCurrentWeaponChanged.Broadcast(CurrentWeapon);
 
@@ -112,6 +207,16 @@ void ASXCharacterBase::SetCurrentWeapon(ASXWeapon* NewWeapon)
 	{
 		CurrentWeapon->BroadcastAmmoChanged();
 	}
+}
+
+ESXWeaponType ASXCharacterBase::GetCurrentWeaponType() const
+{
+	if (IsValid(CurrentWeapon.Get()) == false)
+	{
+		return ESXWeaponType::Unarmed;
+	}
+
+	return CurrentWeapon->GetWeaponType();
 }
 
 UAnimMontage* ASXCharacterBase::GetCurrentWeaponAttackAnimMontage() const

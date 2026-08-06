@@ -4,7 +4,9 @@
 
 #include "Character/SXPlayerCharacter.h"
 #include "Components/SXPickupComponent.h"
+#include "Components/SXInventoryComponent.h"
 #include "Components/SXStatusComponent.h"
+#include "Item/SXWeapon.h"
 
 ASXCollectiblePickup::ASXCollectiblePickup()
 {
@@ -28,6 +30,13 @@ void ASXCollectiblePickup::InitializeCollectible(ESXCollectibleType InCollectibl
 	Amount = FMath::Max(1, InAmount);
 }
 
+void ASXCollectiblePickup::InitializeAmmoCollectible(ESXAmmoType InAmmoType, int32 InAmount)
+{
+	CollectibleType = ESXCollectibleType::Ammo;
+	AmmoType = InAmmoType;
+	Amount = FMath::Max(1, InAmount);
+}
+
 void ASXCollectiblePickup::HandleOnPickUp(ASXPlayerCharacter* InPickUpCharacter)
 {
 	if (IsValid(InPickUpCharacter) == false)
@@ -42,6 +51,16 @@ void ASXCollectiblePickup::HandleOnPickUp(ASXPlayerCharacter* InPickUpCharacter)
 		{
 		case ESXCollectibleType::Experience:
 			StatusComponent->AddExperience(Amount);
+			break;
+		case ESXCollectibleType::Ammo:
+			if (USXInventoryComponent* InventoryComponent = InPickUpCharacter->GetInventoryComponent())
+			{
+				InventoryComponent->AddAmmo(AmmoType, Amount);
+			}
+			if (ASXWeapon* CurrentWeapon = InPickUpCharacter->GetCurrentWeapon())
+			{
+				CurrentWeapon->BroadcastAmmoChanged();
+			}
 			break;
 		case ESXCollectibleType::Gold:
 		default:

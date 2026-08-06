@@ -3,6 +3,7 @@
 #include "Item/SXAmmoTypePickup.h"
 
 #include "Character/SXPlayerCharacter.h"
+#include "Components/SXInventoryComponent.h"
 #include "Components/SXPickupComponent.h"
 #include "Item/SXWeapon.h"
 
@@ -29,13 +30,25 @@ void ASXAmmoTypePickup::HandleOnPickUp(ASXPlayerCharacter* InPickUpCharacter)
 		return;
 	}
 
-	ASXWeapon* CurrentWeapon = InPickUpCharacter->GetCurrentWeapon();
-	if (IsValid(CurrentWeapon) == false)
+	USXInventoryComponent* InventoryComponent = InPickUpCharacter->GetInventoryComponent();
+	if (IsValid(InventoryComponent) == false)
 	{
 		return;
 	}
 
-	CurrentWeapon->SetCurrentAmmoType(DesiredAmmoType);
+	InventoryComponent->AddAmmo(DesiredAmmoType, AmmoAmount);
+
+	ASXWeapon* CurrentWeapon = InPickUpCharacter->GetCurrentWeapon();
+	if (IsValid(CurrentWeapon))
+	{
+		CurrentWeapon->BroadcastAmmoChanged();
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("%s picked up ammo %s x%d. NewCount=%d"),
+		*GetNameSafe(InPickUpCharacter),
+		*UEnum::GetValueAsString(DesiredAmmoType),
+		AmmoAmount,
+		InventoryComponent->GetAmmoCount(DesiredAmmoType));
 
 	if (bDestroyOnPickup)
 	{

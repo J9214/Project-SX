@@ -3,6 +3,7 @@
 #include "Skill/SXDefenseSkill.h"
 
 #include "Character/SXCharacterBase.h"
+#include "Kismet/GameplayStatics.h"
 #include "Skill/SXSkillBarrierActor.h"
 #include "Skill/SXSkillData.h"
 
@@ -21,23 +22,40 @@ bool USXDefenseSkill::Activate()
 		return false;
 	}
 
-	const AController* Controller = OwnerCharacter->GetController();
-	const FRotator ControlRotation = IsValid(Controller) == true ? Controller->GetControlRotation() : OwnerCharacter->GetActorRotation();
-	const FRotator SpawnRotation(0.0f, ControlRotation.Yaw, 0.0f);
-	const FVector SpawnDirection = FRotationMatrix(SpawnRotation).GetUnitAxis(EAxis::X);
-	const FVector SpawnLocation = OwnerCharacter->GetActorLocation() + SpawnDirection * SkillData->TargetDistance;
+	const FRotator SpawnRotation = FRotator::ZeroRotator;
+	const FVector SpawnLocation = OwnerCharacter->GetActorLocation();
 	TSubclassOf<ASXSkillBarrierActor> BarrierActorClass = SkillData->BarrierActorClass;
 	if (BarrierActorClass == nullptr)
 	{
 		BarrierActorClass = ASXSkillBarrierActor::StaticClass();
 	}
 
-	ASXSkillBarrierActor* BarrierActor = World->SpawnActor<ASXSkillBarrierActor>(BarrierActorClass, SpawnLocation, SpawnRotation);
-	if (IsValid(BarrierActor) == true)
+	const FTransform SpawnTransform(SpawnRotation, SpawnLocation);
+	ASXSkillBarrierActor* BarrierActor = World->SpawnActorDeferred<ASXSkillBarrierActor>(
+		BarrierActorClass,
+		SpawnTransform,
+		OwnerCharacter,
+		OwnerCharacter,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn
+	);
+	if (IsValid(BarrierActor) == false)
 	{
-		BarrierActor->InitializeBarrier(OwnerCharacter, SkillData->Duration);
+		EndSkill();
+		return false;
 	}
 
+	BarrierActor->InitializeBarrier(
+		OwnerCharacter,
+		SkillData->Duration,
+		SkillData->BarrierRadius,
+		SkillData->BarrierExpansionDuration,
+		SkillData->BarrierPushStrength,
+		SkillData->BarrierPushTickInterval
+	);
+
+	UGameplayStatics::FinishSpawningActor(BarrierActor, SpawnTransform);
+	UE_LOG(LogTemp, Log, TEXT("Barrier spawned at %s, radius %.1f, duration %.1f."), *SpawnLocation.ToString(), SkillData->BarrierRadius, SkillData->Duration);
+
 	EndSkill();
-	return IsValid(BarrierActor) == true;
+	return true;
 }

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
+#include "Item/SXWeapon.h"
 #include "SXAnimInstance.generated.h"
 
 class ASXCharacterBase;
@@ -33,6 +34,7 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category="SX|Animation")
 	TObjectPtr<UCharacterMovementComponent> MovementComponent;
 
+	
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category="SX|Animation")
 	FVector Velocity = FVector::ZeroVector;
 
@@ -50,6 +52,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category="SX|Animation")
 	bool IsUnarmed = true;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="SX|Animation")
+	ESXWeaponType WeaponType = ESXWeaponType::Unarmed;
 
 	UPROPERTY(BlueprintReadOnly)
 	float NormalizedCurrentPitch;

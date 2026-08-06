@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 using UnrealBuildTool;
+using System.IO;
 
 public class ProjectShooting : ModuleRules
 {
@@ -15,10 +16,13 @@ public class ProjectShooting : ModuleRules
 			"InputCore",
 			"EnhancedInput",
 			"AIModule",
+			"NavigationSystem",
 			"StateTreeModule",
 			"GameplayStateTreeModule",
+			"DeveloperSettings",
 			"UMG",
-			"Slate"
+			"Slate",
+			"Niagara"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
@@ -32,6 +36,19 @@ public class ProjectShooting : ModuleRules
 			"ProjectShooting/Variant_Shooter/UI",
 			"ProjectShooting/Variant_Shooter/Weapons"
 		});
+
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			string StoveSDKDirectory = Path.GetFullPath(Path.Combine(ModuleDirectory, "../../ThirdParty/StovePCSDK"));
+			string StoveIncludeDirectory = Path.Combine(StoveSDKDirectory, "Include");
+			string StoveLibraryPath = Path.Combine(StoveSDKDirectory, "Lib/Win64/BaseSDK.lib");
+			string StoveDLLPath = Path.Combine(StoveSDKDirectory, "Dll/Win64/BaseSDK.dll");
+
+			PublicSystemIncludePaths.Add(StoveIncludeDirectory);
+			PublicAdditionalLibraries.Add(StoveLibraryPath);
+			PublicDelayLoadDLLs.Add("BaseSDK.dll");
+			RuntimeDependencies.Add("$(TargetOutputDir)/BaseSDK.dll", StoveDLLPath, StagedFileType.NonUFS);
+		}
 
 		// Uncomment if you are using Slate UI
 		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });

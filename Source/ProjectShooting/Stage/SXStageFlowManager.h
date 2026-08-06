@@ -8,6 +8,7 @@
 #include "SXStageFlowManager.generated.h"
 
 class ASXStageDoor;
+class USXDropDatabase;
 class USXStageWaveDataAsset;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FSXOnStageStartedSignature);
@@ -39,7 +40,16 @@ public:
 	int32 GetCurrentStageWaveIndex() const { return CurrentStageWaveIndex; }
 
 	UFUNCTION(BlueprintPure, Category="SX|Stage")
+	int32 GetCurrentStageWaveNumber() const { return CurrentStageWaveIndex == INDEX_NONE ? 0 : CurrentStageWaveIndex + 1; }
+
+	UFUNCTION(BlueprintPure, Category="SX|Stage")
 	int32 GetTotalWaveCount() const;
+
+	UFUNCTION(BlueprintPure, Category="SX|Stage")
+	int32 GetCurrentWaveSpawnCount() const { return CurrentWaveSpawnCount; }
+
+	UFUNCTION(BlueprintPure, Category="SX|Stage")
+	ASXWaveSpawner* GetWaveSpawner() const { return WaveSpawner; }
 
 	UFUNCTION(BlueprintPure, Category="SX|Stage")
 	bool IsStageStarted() const { return bStageStarted; }
@@ -52,6 +62,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="SX|Stage|WaveData")
 	void LogActiveWaveData() const;
+
+	UFUNCTION(BlueprintCallable, Category="SX|Stage")
+	void BroadcastStageState();
 
 	UPROPERTY(BlueprintAssignable, Category="SX|Stage")
 	FSXOnStageStartedSignature OnStageStarted;
@@ -70,6 +83,9 @@ protected:
 
 	UFUNCTION()
 	void HandleWaveCleared(int32 WaveIndex);
+
+	UFUNCTION()
+	void HandleWaveAdvanceTimeElapsed();
 
 	void FindStageActors();
 	void StartNextWave();
@@ -99,6 +115,12 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="SX|Stage|WaveData")
 	TArray<FSXStageWaveData> StageWaves;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="SX|Stage|Drop")
+	FName StageId = TEXT("Stage1");
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="SX|Stage|Drop")
+	TObjectPtr<USXDropDatabase> DropDatabase;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="SX|Stage")
 	bool bAutoFindWaveSpawner = true;
 
@@ -112,6 +134,9 @@ protected:
 	int32 CurrentStageWaveIndex = INDEX_NONE;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="SX|Stage")
+	int32 CurrentWaveSpawnCount = 0;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="SX|Stage")
 	bool bStageStarted = false;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="SX|Stage")
@@ -121,5 +146,5 @@ protected:
 	bool bStageFailed = false;
 
 	FTimerHandle NextWaveTimerHandle;
-	FTimerHandle WaveTimeLimitTimerHandle;
+	FTimerHandle WaveAdvanceTimerHandle;
 };
